@@ -35,14 +35,18 @@ function renderRecipes() {
   `).join('');
 }
 
-function analyzeVideo(url) {
+async function analyzeVideo(url) {
   qs('#analysis-area').innerHTML = `<div class="analysis-loading"><div class="loader"></div><strong>영상 속 요리 흐름을 읽고 있어요</strong><p>재료와 순서를 보기 좋게 다듬는 중입니다.</p></div>`;
-  setTimeout(() => {
-    const parsed = { id: `r${Date.now()}`, title: '매콤 두부 덮밥', category: '영상 레시피', time: 20, ingredients: ['두부 1모', '양파 1/2개', '대파 1/2대', '고추장 1큰술', '간장 1큰술', '참기름 약간'], steps: ['두부의 물기를 빼고 한입 크기로 썰어주세요.', '양파와 대파를 잘게 썰어 팬에 볶아주세요.', '고추장과 간장을 넣고 소스를 만든 뒤 두부를 더해주세요.', '따뜻한 밥 위에 올리고 참기름으로 마무리해주세요.'], palette: ['#c05b3e','#efaa62','#733a2d'], emoji: '🌶️', source: url };
+  try {
+    const response = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || '분석에 실패했어요.');
+    const parsed = payload.recipe || { title: '자막을 가져왔어요', category: '로컬 AI 연결 대기', time: 0, ingredients: ['Ollama가 실행 중인지 확인해 주세요.'], steps: ['Ollama를 켠 뒤 다시 분석해 주세요.'], palette: ['#c05b3e','#efaa62','#733a2d'], emoji: '📝' };
+    Object.assign(parsed, { id: `r${Date.now()}`, palette: parsed.palette || ['#c05b3e','#efaa62','#733a2d'], emoji: parsed.emoji || '🍳', source: url });
     window.currentParsed = parsed;
     qs('#analysis-area').innerHTML = `
       <article class="analysis-result">
-        <div class="result-top"><div><span class="section-kicker">분석 완료 · 예상 ${parsed.time}분</span><h2>${parsed.title}</h2><p>2인분 · 초보자도 쉬워요</p></div><button class="save-button" id="save-parsed">내 레시피 북에 저장</button></div>
+        <div class="result-top"><div><span class="section-kicker">${payload.aiEnabled ? `${payload.provider} 분석 완료` : '자막 수집 완료 · 로컬 AI 대기'} · 예상 ${parsed.time || '-'}분</span><h2>${parsed.title}</h2><p>${payload.language ? `자막 언어 ${payload.language} · ` : ''}영상에서 추출한 레시피</p></div><button class="save-button" id="save-parsed">내 레시피 북에 저장</button></div>
         <div class="result-columns"><div><h3>준비할 재료</h3><ul>${parsed.ingredients.map((x) => `<li>${x}</li>`).join('')}</ul></div><div><h3>조리 순서</h3><ol>${parsed.steps.map((x) => `<li>${x}</li>`).join('')}</ol></div></div>
       </article>`;
     qs('#save-parsed').addEventListener('click', () => {
@@ -51,7 +55,9 @@ function analyzeVideo(url) {
       toast('레시피 북에 저장했어요');
       setTimeout(() => showView('home'), 500);
     });
-  }, 1400);
+  } catch (error) {
+    qs('#analysis-area').innerHTML = `<div class="analysis-result"><div class="result-top"><div><span class="section-kicker">분석을 시작하지 못했어요</span><h2>자막을 확인해 주세요</h2><p>${error.message}</p></div></div><p class="helper">자막이 공개된 YouTube 영상인지, 주소가 올바른지 확인한 뒤 다시 시도해 주세요.</p></div>`;
+  }
 }
 
 function renderPantry() {

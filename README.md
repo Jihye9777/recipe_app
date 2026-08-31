@@ -14,4 +14,16 @@ conda run -n env_recipe python server.py
 
 브라우저에서 `http://localhost:8000`을 엽니다.
 
-현재 YouTube 분석은 화면 흐름을 확인하기 위한 데모입니다. 실제 영상 자막·음성 분석은 API 연동 단계에서 추가할 수 있습니다.
+## 실제 YouTube + AI 분석
+
+서버가 YouTube 공개 자막을 읽고, 항상 Ollama의 로컬 모델로 재료와 조리 순서를 정리합니다. OpenAI API 키는 사용하지 않습니다.
+
+현재 Ollama 모델이 `gemma4:latest`로 설치되어 있어 기본값으로 사용합니다. 다른 모델이면 `OLLAMA_MODEL` 환경 변수로 바꿀 수 있습니다.
+
+PowerShell 예시:
+
+```powershell
+conda run -n env_recipe python server.py
+```
+
+Ollama가 실행 중이지 않으면 자막 수집까지만 동작하며 앱 화면에서 실행 안내를 보여줍니다. YouTube 자막이 비공개인 영상은 분석할 수 없습니다.
