@@ -23,7 +23,14 @@ button { color: inherit; }
 nav { display: flex; gap: 8px; }
 .nav-link { border: 0; background: transparent; padding: 11px 18px; border-radius: 999px; color: var(--muted); font-size: 14px; font-weight: 600; cursor: pointer; }
 .nav-link.active { color: var(--green); background: rgba(49, 91, 58, .09); }
-.round-button { justify-self: end; border: 0; width: 43px; height: 43px; border-radius: 50%; background: var(--green); color: white; font-size: 25px; line-height: 1; cursor: pointer; box-shadow: 0 8px 18px rgba(49,91,58,.22); }
+.top-actions { justify-self: end; display: flex; align-items: center; gap: 10px; }
+.llm-status { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.llm-status i { display: block; width: 7px; height: 7px; border-radius: 50%; background: #b3b4a9; }
+.llm-status.online { color: var(--green); background: #edf4e9; border-color: #d6e5ce; }
+.llm-status.online i { background: #4d9a57; box-shadow: 0 0 0 3px rgba(77,154,87,.15); }
+.llm-status.offline { color: #a04d38; background: #fff0e9; border-color: #f2d1c2; }
+.llm-status.offline i { background: #dc6a47; }
+.round-button { border: 0; width: 43px; height: 43px; border-radius: 50%; background: var(--green); color: white; font-size: 25px; line-height: 1; cursor: pointer; box-shadow: 0 8px 18px rgba(49,91,58,.22); }
 main { padding: 68px 0 80px; }
 .view { display: none; animation: rise .35s ease both; }
 .view.active { display: block; }
@@ -64,6 +71,14 @@ h1 em { color: var(--green); font-style: normal; position: relative; }
 .url-row input { min-width: 0; border: 0; outline: 0; background: transparent; padding: 10px 2px; color: var(--ink); }
 .primary-button { border: 0; border-radius: 10px; background: var(--green); color: #fff; padding: 13px 19px; font-weight: 700; cursor: pointer; }
 .helper { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
+.cookie-choice { display: flex; align-items: center; gap: 8px; margin-top: 13px; color: var(--green); font-size: 12px; cursor: pointer; }
+.cookie-choice input { accent-color: var(--green); }
+.cookie-choice small { color: var(--muted); }
+.manual-entry { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
+.manual-entry-head { display: flex; justify-content: space-between; gap: 14px; margin-bottom: 10px; font-size: 13px; }
+.manual-entry-head span { color: var(--muted); font-size: 12px; }
+.manual-entry textarea { width: 100%; resize: vertical; min-height: 108px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; color: var(--ink); background: #faf7f0; outline: none; line-height: 1.55; }
+.text-button { display: block; margin: 10px 0 0 auto; border: 1px solid var(--green); border-radius: 10px; padding: 10px 14px; color: var(--green); background: transparent; font-weight: 700; cursor: pointer; }
 #analysis-area { max-width: 940px; margin: 24px auto 0; }
 .analysis-loading, .analysis-result { padding: 30px; border: 1px solid var(--line); border-radius: 24px; background: rgba(255,253,248,.72); }
 .analysis-loading { text-align: center; color: var(--muted); }
@@ -100,6 +115,7 @@ h1 em { color: var(--green); font-style: normal; position: relative; }
 @media (max-width: 800px) {
   .shell { width: min(100% - 28px, 680px); }
   .topbar { height: 74px; grid-template-columns: 1fr auto; }
+  .llm-status { display: none; }
   nav { position: fixed; z-index: 9; left: 14px; right: 14px; bottom: 12px; justify-content: space-around; padding: 7px; border: 1px solid var(--line); background: rgba(255,253,248,.94); backdrop-filter: blur(16px); border-radius: 18px; box-shadow: var(--shadow); }
   .nav-link { padding: 10px 12px; font-size: 12px; }
   main { padding: 45px 0 100px; }
@@ -111,6 +127,8 @@ h1 em { color: var(--green); font-style: normal; position: relative; }
   .desktop-only { display: none; }
   .url-row { grid-template-columns: auto 1fr; }
   .primary-button { grid-column: 1 / -1; }
+  .manual-entry-head { display: block; }
+  .manual-entry-head span { display: block; margin-top: 5px; }
   .result-columns { grid-template-columns: 1fr; }
   .result-top { display: block; }
   .save-button { margin-top: 18px; }

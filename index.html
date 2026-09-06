@@ -26,7 +26,7 @@
         <button class="nav-link" data-view="import">영상 가져오기</button>
         <button class="nav-link" data-view="pantry">내 냉장고</button>
       </nav>
-      <button class="round-button" id="open-import" aria-label="새 레시피 추가">＋</button>
+      <div class="top-actions"><span class="llm-status checking" id="llm-status"><i></i>로컬 AI 확인 중</span><button class="round-button" id="open-import" aria-label="새 레시피 추가">＋</button></div>
     </header>
 
     <main>
@@ -59,15 +59,24 @@
           <h1>영상은 그대로,<br /><em>레시피는 한눈에.</em></h1>
           <p>유튜브 주소를 붙여 넣으면 재료와 조리 순서를 한 페이지로 정리해드려요.</p>
         </div>
-        <form class="url-card" id="url-form">
+        <div class="url-card">
+          <form id="url-form">
           <label for="youtube-url">유튜브 영상 주소</label>
           <div class="url-row">
             <span class="youtube-badge">▶</span>
             <input id="youtube-url" type="url" placeholder="https://youtube.com/watch?v=..." required />
             <button class="primary-button" type="submit">레시피 분석</button>
           </div>
-          <p class="helper">자막이 공개된 요리 영상에서 자막을 가져와 레시피로 정리해요.</p>
-        </form>
+          <p class="helper">YouTube 자막을 가져와 로컬 AI가 레시피로 정리해요. 자막을 가져오지 못하면 아래에 텍스트를 직접 붙여 넣을 수 있어요.</p>
+          </form>
+          <div class="manual-entry">
+            <div class="manual-entry-head"><strong>자막 또는 레시피 텍스트 직접 붙여넣기</strong><span>자동 추출이 막힐 때 사용하세요</span></div>
+            <form id="text-form">
+              <textarea id="source-text" rows="5" placeholder="유튜브 스크립트, 영상 설명란의 레시피, 메모를 붙여 넣으세요."></textarea>
+              <button class="text-button" type="submit">텍스트로 정리</button>
+            </form>
+          </div>
+        </div>
         <div id="analysis-area" aria-live="polite"></div>
       </section>
 

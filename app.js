@@ -35,18 +35,24 @@ function renderRecipes() {
   `).join('');
 }
 
-async function analyzeVideo(url) {
+async function analyzeVideo(url, text = '') {
   qs('#analysis-area').innerHTML = `<div class="analysis-loading"><div class="loader"></div><strong>영상 속 요리 흐름을 읽고 있어요</strong><p>재료와 순서를 보기 좋게 다듬는 중입니다.</p></div>`;
   try {
-    const response = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
-    const payload = await response.json();
+    const response = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, text }) });
+    const rawPayload = await response.text();
+    let payload;
+    try {
+      payload = JSON.parse(rawPayload);
+    } catch {
+      throw new Error(`앱 서버가 빈 응답을 보냈어요. 서버를 한 번만 실행한 뒤 다시 시도해 주세요. (HTTP ${response.status})`);
+    }
     if (!response.ok) throw new Error(payload.error || '분석에 실패했어요.');
     const parsed = payload.recipe || { title: '자막을 가져왔어요', category: '로컬 AI 연결 대기', time: 0, ingredients: ['Ollama가 실행 중인지 확인해 주세요.'], steps: ['Ollama를 켠 뒤 다시 분석해 주세요.'], palette: ['#c05b3e','#efaa62','#733a2d'], emoji: '📝' };
     Object.assign(parsed, { id: `r${Date.now()}`, palette: parsed.palette || ['#c05b3e','#efaa62','#733a2d'], emoji: parsed.emoji || '🍳', source: url });
     window.currentParsed = parsed;
     qs('#analysis-area').innerHTML = `
       <article class="analysis-result">
-        <div class="result-top"><div><span class="section-kicker">${payload.aiEnabled ? `${payload.provider} 분석 완료` : '자막 수집 완료 · 로컬 AI 대기'} · 예상 ${parsed.time || '-'}분</span><h2>${parsed.title}</h2><p>${payload.language ? `자막 언어 ${payload.language} · ` : ''}영상에서 추출한 레시피</p></div><button class="save-button" id="save-parsed">내 레시피 북에 저장</button></div>
+        <div class="result-top"><div><span class="section-kicker">${payload.aiEnabled ? `${payload.provider} 분석 완료` : '자막 수집 완료 · 로컬 AI 대기'} · 예상 ${parsed.time || '-'}분</span><h2>${parsed.title}</h2><p>${payload.source || '영상에서 추출한 텍스트'} · ${payload.language || '한국어'}</p></div><button class="save-button" id="save-parsed">내 레시피 북에 저장</button></div>
         <div class="result-columns"><div><h3>준비할 재료</h3><ul>${parsed.ingredients.map((x) => `<li>${x}</li>`).join('')}</ul></div><div><h3>조리 순서</h3><ol>${parsed.steps.map((x) => `<li>${x}</li>`).join('')}</ol></div></div>
       </article>`;
     qs('#save-parsed').addEventListener('click', () => {
@@ -56,7 +62,8 @@ async function analyzeVideo(url) {
       setTimeout(() => showView('home'), 500);
     });
   } catch (error) {
-    qs('#analysis-area').innerHTML = `<div class="analysis-result"><div class="result-top"><div><span class="section-kicker">분석을 시작하지 못했어요</span><h2>자막을 확인해 주세요</h2><p>${error.message}</p></div></div><p class="helper">자막이 공개된 YouTube 영상인지, 주소가 올바른지 확인한 뒤 다시 시도해 주세요.</p></div>`;
+    const blocked = error.message.includes('page needs to be reloaded');
+    qs('#analysis-area').innerHTML = `<div class="analysis-result"><div class="result-top"><div><span class="section-kicker">분석을 시작하지 못했어요</span><h2>${blocked ? 'YouTube가 자동 요청을 막았어요' : '자막을 확인해 주세요'}</h2><p>${error.message}</p></div></div><p class="helper">${blocked ? '아래 텍스트 붙여넣기 입력란에 영상 스크립트나 설명란의 레시피를 넣으면 바로 Ollama로 정리할 수 있어요.' : '자막이 공개된 YouTube 영상인지, 주소가 올바른지 확인한 뒤 다시 시도해 주세요.'}</p></div>`;
   }
 }
 
@@ -93,8 +100,25 @@ function toast(message) {
   clearTimeout(window.toastTimer); window.toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
 }
 
+async function refreshLlmStatus() {
+  const badge = qs('#llm-status');
+  if (!badge) return;
+  try {
+    const response = await fetch('/api/status');
+    const status = await response.json();
+    badge.className = `llm-status ${status.running && status.modelInstalled ? 'online' : 'offline'}`;
+    badge.innerHTML = `<i></i>${status.running && status.modelInstalled ? `로컬 AI 연결됨 · ${status.model}` : status.running ? 'Ollama 실행 중 · 모델 확인 필요' : '로컬 AI 연결 안 됨'}`;
+    badge.title = status.running ? `Ollama 포트 11434 · ${status.model}` : 'Ollama가 실행 중인지 확인해 주세요.';
+  } catch {
+    badge.className = 'llm-status offline'; badge.innerHTML = '<i></i>상태 확인 실패';
+  }
+}
+
 qsa('[data-view]').forEach((el) => el.addEventListener('click', () => showView(el.dataset.view)));
 qs('#open-import').addEventListener('click', () => showView('import'));
 qs('#url-form').addEventListener('submit', (event) => { event.preventDefault(); analyzeVideo(qs('#youtube-url').value); });
+qs('#text-form').addEventListener('submit', (event) => { event.preventDefault(); const text = qs('#source-text').value.trim(); if (text) analyzeVideo('', text); else toast('붙여 넣을 텍스트를 입력해 주세요.'); });
 qs('#ingredient-form').addEventListener('submit', (event) => { event.preventDefault(); addIngredient(qs('#ingredient-input').value); qs('#ingredient-input').value = ''; });
 renderRecipes();
+refreshLlmStatus();
+setInterval(refreshLlmStatus, 5000);
