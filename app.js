@@ -26,13 +26,29 @@ function showView(name) {
 function renderRecipes() {
   qs('#recipe-count').textContent = `${recipes.length}개의 레시피`;
   qs('#recipe-grid').innerHTML = recipes.map((recipe, i) => `
-    <article class="recipe-card" style="--card-bg:linear-gradient(145deg, ${recipe.palette[2]}, ${recipe.palette[0]}); --food-a:${recipe.palette[0]}; --food-b:${recipe.palette[1]}; --food-c:${recipe.palette[2]}">
+    <article class="recipe-card" data-recipe-index="${i}" tabindex="0" role="button" aria-label="${recipe.title} 레시피 보기" style="--card-bg:linear-gradient(145deg, ${recipe.palette[2]}, ${recipe.palette[0]}); --food-a:${recipe.palette[0]}; --food-b:${recipe.palette[1]}; --food-c:${recipe.palette[2]}">
       <div class="card-emoji" aria-hidden="true">${recipe.emoji || '🍽️'}</div>
       <div class="recipe-meta"><span>${recipe.category}</span><span>${recipe.time}분</span></div>
       <h3>${recipe.title}</h3>
       <p>${recipe.ingredients.slice(0, 4).join(' · ')}</p>
     </article>
   `).join('');
+  qsa('#recipe-grid .recipe-card').forEach((card) => {
+    const open = () => showSavedRecipe(recipes[Number(card.dataset.recipeIndex)]);
+    card.addEventListener('click', open);
+    card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } });
+  });
+}
+
+function showSavedRecipe(recipe) {
+  if (!recipe) return;
+  showView('import');
+  qs('#analysis-area').innerHTML = `
+    <article class="analysis-result saved-recipe-detail">
+      <div class="result-top"><div><span class="section-kicker">내 레시피 북 · 저장된 레시피</span><h2>${recipe.title}</h2><p>${recipe.category || '요리'} · 예상 ${recipe.time || '-'}분${recipe.source ? ` · ${recipe.source}` : ''}</p></div><button class="save-button" id="back-to-recipes">레시피 목록</button></div>
+      <div class="result-columns"><div><h3>준비할 재료</h3><ul>${(recipe.ingredients || []).map((x) => `<li>${x}</li>`).join('')}</ul></div><div><h3>조리 순서</h3><ol>${(recipe.steps || []).map((x) => `<li>${x}</li>`).join('')}</ol></div></div>
+    </article>`;
+  qs('#back-to-recipes').addEventListener('click', () => showView('home'));
 }
 
 async function analyzeVideo(url, text = '') {
