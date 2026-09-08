@@ -7,6 +7,7 @@ import json
 import os
 import re
 import tempfile
+import uuid
 
 ROOT = Path(__file__).resolve().parent
 os.chdir(ROOT)
@@ -47,6 +48,40 @@ def transcript_from_youtube_transcript_api(video_id):
         raise RuntimeError("youtube-transcript-api에서 빈 자막이 반환됐어요.")
     return transcript, fetched.language_code, f"YouTube 자막 · {fetched.language}"
 
+def transcript_from_local_whisper(video_url):
+    """자막이 없는 영상에서 오디오만 임시로 받아 로컬 Whisper로 변환합니다."""
+    try:
+        from faster_whisper import WhisperModel
+        from pytube import YouTube
+    except ImportError:
+        raise RuntimeError("로컬 음성 인식 패키지가 설치되어 있지 않아요.")
+
+    audio_path = None
+    try:
+        video = YouTube(video_url)
+        audio_stream = video.streams.get_audio_only()
+        if audio_stream is None:
+            audio_stream = video.streams.filter(only_audio=True).order_by("abr").desc().first()
+        if audio_stream is None:
+            raise RuntimeError("영상에서 오디오 스트림을 찾지 못했어요.")
+        audio_path = audio_stream.download(
+            output_path=str(RUNTIME_DIR),
+            filename=f"whisper-{uuid.uuid4().hex}.mp4",
+        )
+        model_name = os.environ.get("WHISPER_MODEL", "base")
+        model = WhisperModel(model_name, device="cpu", compute_type="int8")
+        segments, _ = model.transcribe(audio_path, language="ko", vad_filter=True)
+        transcript = " ".join(segment.text.strip() for segment in segments).strip()
+        if not transcript:
+            raise RuntimeError("영상 음성에서 텍스트를 만들지 못했어요.")
+        return transcript, "ko", f"로컬 Whisper · {model_name}"
+    finally:
+        if audio_path:
+            try:
+                Path(audio_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
 def extract_transcript(video_url):
     video_id = video_id_from_url(video_url)
     if not video_id:
@@ -54,7 +89,11 @@ def extract_transcript(video_url):
     try:
         return transcript_from_youtube_transcript_api(video_id)
     except Exception as error:
-        raise RuntimeError(f"자막 API로 자막을 가져오지 못했어요: {error}")
+        subtitle_error = error
+    try:
+        return transcript_from_local_whisper(video_url)
+    except Exception as whisper_error:
+        raise RuntimeError(f"자막 API: {subtitle_error} / 로컬 Whisper: {whisper_error}")
 
 def call_ollama(transcript):
     schema = {"type": "object", "properties": {"title": {"type": "string"}, "category": {"type": "string"}, "time": {"type": "integer"}, "ingredients": {"type": "array", "items": {"type": "string"}}, "steps": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "category", "time", "ingredients", "steps"]}
