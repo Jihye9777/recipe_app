@@ -1,6 +1,6 @@
-# YouTube 자막 추출
+# YouTube transcript extraction
 youtube-transcript-api==1.2.4
 
-# 자막이 없을 때: 오디오를 받아 로컬 Whisper로 텍스트 변환
-pytube==15.0.0
+# Audio download and local speech recognition fallback (no yt-dlp)
+pytubefix==11.1.0
 faster-whisper==1.2.1

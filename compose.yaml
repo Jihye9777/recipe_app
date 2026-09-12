@@ -1,0 +1,16 @@
+services:
+  weaviate:
+    image: cr.weaviate.io/semitechnologies/weaviate:1.39.2
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:50051:50051"
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    environment:
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+      CLUSTER_HOSTNAME: recipe-node
+    restart: unless-stopped
+volumes:
+  weaviate_data:

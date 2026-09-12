@@ -133,3 +133,11 @@ h1 em { color: var(--green); font-style: normal; position: relative; }
   .result-top { display: block; }
   .save-button { margin-top: 18px; }
 }
+
+[hidden] { display: none !important; }
+.search-filters { display: grid; gap: 14px; margin-top: 24px; }
+.search-filters label { display: grid; gap: 6px; font-size: 14px; }
+.search-filters input:not([type=checkbox]), .search-filters select, #review-json { width: 100%; border: 1px solid #d8d6ce; border-radius: 10px; padding: 10px; background: #faf8f2; color: #27392b; font: inherit; }
+#review-json { display: block; margin: 16px 0; font-family: monospace; }
+.analysis-result p { overflow-wrap: anywhere; white-space: pre-wrap; }
+.recommend-item[role=button] { cursor: pointer; }

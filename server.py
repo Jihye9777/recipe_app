@@ -8,6 +8,17 @@ import os
 import re
 import tempfile
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+from storage import Store, public
+from integrations import Ollama, WeaviateIndex
+from workflows import Pipelines
+from domain import normalize, semantic, canonical, SearchInput
+from health import service_health
+
+# This personal app must not send recipe/checkpoint content to cloud tracing services.
+os.environ['LANGSMITH_TRACING'] = 'false'
+os.environ['LANGCHAIN_TRACING_V2'] = 'false'
 
 ROOT = Path(__file__).resolve().parent
 os.chdir(ROOT)
@@ -21,6 +32,33 @@ tempfile.tempdir = str(RUNTIME_DIR)
 # 이 설정은 이 앱 프로세스에만 적용됩니다.
 os.environ["NO_PROXY"] = "*"
 os.environ["no_proxy"] = "*"
+
+DATA_DIR = Path(os.environ.get('RECIPE_DATA_DIR',str(ROOT / 'data')))
+DATA_DIR.mkdir(exist_ok=True)
+STORE = Store(DATA_DIR / 'recipe.db')
+PIPELINES = None
+WORKER = ThreadPoolExecutor(max_workers=1)
+ACTIVE = set()
+ACTIVE_LOCK = Lock()
+
+def pipelines():
+    global PIPELINES
+    if PIPELINES is None:
+        llm = Ollama()
+        PIPELINES = Pipelines(STORE, llm, WeaviateIndex(llm), extract_transcript, str(DATA_DIR / 'checkpoints.db'))
+    return PIPELINES
+
+def submit_job(id, payload=None, resume=None):
+    with ACTIVE_LOCK:
+        if id in ACTIVE: raise ValueError('이미 처리 중인 작업입니다.')
+        ACTIVE.add(id)
+        STORE.job(id,status='queued')
+    def work():
+        try: pipelines().run(id,payload,resume)
+        except Exception as e: STORE.job(id,status='failed',error=str(e))
+        finally:
+            with ACTIVE_LOCK: ACTIVE.discard(id)
+    WORKER.submit(work)
 
 def video_id_from_url(value):
     parsed = urlparse(value)
@@ -39,10 +77,14 @@ def transcript_from_youtube_transcript_api(video_id):
         from requests import Session
     except ImportError:
         raise RuntimeError("youtube-transcript-api가 설치되어 있지 않아요.")
+    class TranscriptSession(Session):
+        def request(self, *args, **kwargs):
+            kwargs.setdefault('timeout',(5,20))
+            return super().request(*args,**kwargs)
     # requests가 시스템 프록시 환경 변수를 따르지 않도록 합니다.
-    http_client = Session()
-    http_client.trust_env = False
-    fetched = YouTubeTranscriptApi(http_client=http_client).fetch(video_id, languages=["ko", "en"])
+    with TranscriptSession() as http_client:
+        http_client.trust_env = False
+        fetched = YouTubeTranscriptApi(http_client=http_client).fetch(video_id, languages=["ko", "en"])
     transcript = " ".join(item.text.strip() for item in fetched if item.text.strip()).strip()
     if not transcript:
         raise RuntimeError("youtube-transcript-api에서 빈 자막이 반환됐어요.")
@@ -52,7 +94,7 @@ def transcript_from_local_whisper(video_url):
     """자막이 없는 영상에서 오디오만 임시로 받아 로컬 Whisper로 변환합니다."""
     try:
         from faster_whisper import WhisperModel
-        from pytube import YouTube
+        from pytubefix import YouTube
     except ImportError:
         raise RuntimeError("로컬 음성 인식 패키지가 설치되어 있지 않아요.")
 
@@ -67,9 +109,11 @@ def transcript_from_local_whisper(video_url):
         audio_path = audio_stream.download(
             output_path=str(RUNTIME_DIR),
             filename=f"whisper-{uuid.uuid4().hex}.mp4",
+            timeout=30,
+            max_retries=1,
         )
         model_name = os.environ.get("WHISPER_MODEL", "base")
-        model = WhisperModel(model_name, device="cpu", compute_type="int8")
+        model = WhisperModel(model_name, device="cpu", compute_type="int8",download_root=str(RUNTIME_DIR/'whisper-models'))
         segments, _ = model.transcribe(audio_path, language="ko", vad_filter=True)
         transcript = " ".join(segment.text.strip() for segment in segments).strip()
         if not transcript:
@@ -95,25 +139,6 @@ def extract_transcript(video_url):
     except Exception as whisper_error:
         raise RuntimeError(f"자막 API: {subtitle_error} / 로컬 Whisper: {whisper_error}")
 
-def call_ollama(transcript):
-    schema = {"type": "object", "properties": {"title": {"type": "string"}, "category": {"type": "string"}, "time": {"type": "integer"}, "ingredients": {"type": "array", "items": {"type": "string"}}, "steps": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "category", "time", "ingredients", "steps"]}
-    prompt = "다음은 요리 영상의 자막입니다. 자막에 근거해서만 한국어 레시피를 JSON으로 정리하세요. 재료는 분량을 포함하고, 추측한 내용은 넣지 마세요. 조리 순서는 짧은 명령형 문장으로 작성하세요. JSON 키는 title, category, time, ingredients, steps만 사용하세요.\n\n" + transcript[:18000]
-    base_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
-    model = os.environ.get("OLLAMA_MODEL", "gemma4:latest")
-    payload = {"model": model, "prompt": prompt, "format": schema, "stream": False, "options": {"temperature": 0.2}}
-    request = Request(f"{base_url.rstrip('/')}/api/generate", data=json.dumps(payload, ensure_ascii=False).encode(), headers={"Content-Type": "application/json"}, method="POST")
-    with urlopen(request, timeout=120) as response:
-        result = json.loads(response.read().decode())
-    if not result.get("response"):
-        raise RuntimeError("Ollama 응답이 비어 있어요.")
-    return json.loads(result["response"])
-
-def call_available_model(transcript):
-    try:
-        return call_ollama(transcript), "Ollama · " + os.environ.get("OLLAMA_MODEL", "gemma4:latest")
-    except (URLError, TimeoutError, HTTPError, json.JSONDecodeError):
-        return None, None
-
 class RecipeHandler(SimpleHTTPRequestHandler):
     def send_json(self, status, body):
         encoded = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -124,6 +149,16 @@ class RecipeHandler(SimpleHTTPRequestHandler):
         self.wfile.write(encoded)
 
     def do_GET(self):
+        route = self.path.split('?',1)[0]
+        if route == '/api/health':
+            self.send_json(200,service_health(STORE)); return
+        if route == '/api/recipes':
+            self.send_json(200, {'recipes':[public(r) for r in STORE.all()]}); return
+        if route == '/api/pantry':
+            self.send_json(200, {'pantry':STORE.pantry()}); return
+        if route.startswith('/api/jobs/'):
+            job=STORE.job(route.rsplit('/',1)[1])
+            self.send_json(200 if job else 404, job or {'error':'작업이 없습니다.'}); return
         if self.path.split("?", 1)[0] == "/api/status":
             base_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
             model = os.environ.get("OLLAMA_MODEL", "gemma4:latest")
@@ -132,32 +167,64 @@ class RecipeHandler(SimpleHTTPRequestHandler):
                 with urlopen(request, timeout=2) as response:
                     payload = json.loads(response.read().decode())
                 names = [item.get("name") for item in payload.get("models", [])]
-                self.send_json(200, {"running": True, "model": model, "modelInstalled": model in names, "models": names})
+                installed=model in names or (':' not in model and model+':latest' in names)
+                self.send_json(200, {"running": True, "model": model, "modelInstalled": installed, "models": names})
             except Exception:
                 self.send_json(200, {"running": False, "model": model, "modelInstalled": False, "models": []})
             return
+        # Never expose SQLite, checkpoints, source code or temporary audio via static serving.
+        if route not in {'/','/index.html','/app.js','/styles.css','/assets/og.png'}:
+            self.send_error(404); return
         super().do_GET()
 
+    def do_HEAD(self):
+        self.send_error(405)
+
     def do_POST(self):
-        if self.path != "/api/analyze":
-            self.send_json(404, {"error": "Not found"})
-            return
         try:
+            if self.headers.get('Content-Type','').split(';')[0] != 'application/json':
+                self.send_json(415,{'error':'application/json 요청만 지원합니다.'}); return
             size = int(self.headers.get("Content-Length", "0"))
+            if size < 1 or size > 2_000_000: raise ValueError('요청 크기를 확인해 주세요.')
             body = json.loads(self.rfile.read(size).decode("utf-8"))
-            video_url = body.get("url", "").strip()
-            pasted_text = body.get("text", "").strip()
-            if pasted_text:
-                transcript, language, source = pasted_text, "직접 입력", "직접 붙여넣은 텍스트"
-                video_id = None
-            else:
-                video_id = video_id_from_url(video_url)
-                if not video_id:
-                    raise ValueError("유효한 YouTube 주소를 입력하거나 자막 텍스트를 붙여 넣어 주세요.")
-                transcript, language, source = extract_transcript(video_url)
-            recipe, provider = call_available_model(transcript)
-            self.send_json(200, {"videoId": video_id, "language": language, "source": source, "transcriptChars": len(transcript), "recipe": recipe, "aiEnabled": bool(provider), "provider": provider})
-        except (ValueError, RuntimeError) as error:
+            if not isinstance(body,dict): raise ValueError('JSON 객체가 필요합니다.')
+            if self.path == '/api/analyze':
+                payload={'url':str(body.get('url','')).strip(),'text':str(body.get('text','')).strip()}
+                id=str(uuid.uuid4()); STORE.job(id,status='queued',payload=payload)
+                submit_job(id,payload)
+                self.send_json(202,{'job_id':id}); return
+            if self.path in {'/api/review','/api/retry'}:
+                id=body['job_id']; job=STORE.job(id)
+                if not job or job['status'] not in {'review','failed','running','queued'}: raise ValueError('재개할 작업이 없습니다.')
+                if self.path == '/api/review' and job['status']!='review': raise ValueError('확인 대기 중인 작업이 아닙니다.')
+                if self.path == '/api/retry' and job['status']=='review': raise ValueError('검토 내용을 확인해 주세요.')
+                if self.path == '/api/review':
+                    if body.get('approved') is not True: raise ValueError('확인 후 저장해 주세요.')
+                    body['recipe']=normalize(body.get('recipe') or job['result']['recipe'])
+                submit_job(id,resume=body if self.path=='/api/review' else None)
+                self.send_json(202,{'job_id':id}); return
+            if self.path == '/api/pantry':
+                items=SearchInput(pantry=body.get('pantry',[])).pantry
+                self.send_json(200,{'pantry':STORE.pantry(sorted({canonical(x) for x in items if x.strip()}))}); return
+            if self.path == '/api/search':
+                req=SearchInput.model_validate(body).model_dump()
+                future=WORKER.submit(lambda:pipelines().search.invoke({'request':req})['result'])
+                self.send_json(200,future.result()); return
+            if self.path == '/api/reindex':
+                future=WORKER.submit(lambda:pipelines().reindex(body['id']))
+                self.send_json(200,future.result()); return
+            if self.path == '/api/import':
+                count=0; errors=[]
+                for old in body.get('recipes',[]):
+                    try:
+                        r=normalize({'title':old['title'],'category':old.get('category','요리'),'time':old.get('time') or None,
+                            'ingredients':[{'raw_name':x,'name':x} for x in old['ingredients']], 'steps':old['steps']})
+                        key='legacy:'+str(old['id'])
+                        STORE.save(str(uuid.uuid5(uuid.NAMESPACE_URL,key)),key,old.get('source',''),'',r,semantic(r,''),'legacy'); count+=1
+                    except (ValueError,KeyError,TypeError) as e: errors.append(str(e))
+                self.send_json(200,{'imported':count,'errors':errors}); return
+            self.send_json(404,{'error':'Not found'})
+        except (ValueError, RuntimeError, KeyError, TypeError) as error:
             self.send_json(422, {"error": str(error)})
         except (HTTPError, URLError, TimeoutError) as error:
             self.send_json(502, {"error": "이 컴퓨터에서 YouTube 서버 연결이 차단됐어요. Ollama 문제가 아닙니다.", "detail": "인터넷 연결/프록시를 확인하거나, 자막 텍스트를 직접 입력하는 방식으로 테스트해 주세요. " + str(error)})
@@ -165,6 +232,12 @@ class RecipeHandler(SimpleHTTPRequestHandler):
             self.send_json(500, {"error": "분석 중 알 수 없는 오류가 발생했어요.", "detail": str(error)})
 
 if __name__ == "__main__":
+    httpd = ThreadingHTTPServer(("127.0.0.1", 8000), RecipeHandler)
     print("한입노트가 http://localhost:8000 에서 실행 중입니다.", flush=True)
-    print("항상 로컬 Ollama 모델을 사용합니다.", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", 8000), RecipeHandler).serve_forever()
+    print("SQLite 원본 DB + LangGraph + 로컬 Ollama + Weaviate 검색 인덱스", flush=True)
+    try: httpd.serve_forever()
+    except KeyboardInterrupt: print("서버를 종료합니다.", flush=True)
+    finally:
+        httpd.server_close()
+        WORKER.shutdown(wait=True)
+        if PIPELINES: PIPELINES.checkpoint_db.close()

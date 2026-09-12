@@ -30,6 +30,7 @@
     </header>
 
     <main>
+      <p id="service-health" class="helper" role="status">저장소·모델·검색 DB 상태 확인 중…</p>
       <section class="view active" id="home-view">
         <div class="intro-row">
           <div>
@@ -50,6 +51,7 @@
           <div><span class="section-kicker">MY RECIPES</span><h2>최근에 담은 레시피</h2></div>
           <span class="count-pill" id="recipe-count">3개의 레시피</span>
         </div>
+        <button class="text-button" id="migrate" hidden>이 브라우저의 예전 레시피를 SQLite로 가져오기</button>
         <div class="recipe-grid" id="recipe-grid" aria-live="polite"></div>
       </section>
 
@@ -95,6 +97,18 @@
             </form>
             <div class="quick-add" id="quick-add"></div>
             <div class="ingredient-tags" id="ingredient-tags"></div>
+            <form id="search-form" class="search-filters">
+              <label>찾고 싶은 요리<input id="search-query" placeholder="매운 국물 요리" /></label>
+              <label>최대 조리 시간(분)<input id="max-time" type="number" min="1" /></label>
+              <label>최대 부족 재료 수<input id="max-missing" type="number" min="0" /></label>
+              <label>매운맛 추정 최솟값<select id="min-spice"><option value="">제한 없음</option><option value="2">매운 재료 포함(2 이상)</option><option value="3">청양고추 포함(3 이상)</option></select></label>
+              <label>제외할 재료<input id="exclude" placeholder="땅콩, 새우" /></label>
+              <label>알레르기(엄격 모드)<input id="allergens" placeholder="우유, 달걀" /></label>
+              <p class="helper">안전성 미검증 레시피는 엄격 모드에서 전부 제외됩니다. 제외 재료 검색만으로 알레르기 안전을 보장하지 않습니다.</p>
+              <label>보유 조리 도구<input id="tools" placeholder="프라이팬, 냄비 (빈칸: 제한 없음)" /></label>
+              <label><input id="tips" type="checkbox" /> 로컬 AI 대체 재료·조리 팁 생성</label>
+              <button class="primary-button" type="submit">조건으로 추천받기</button>
+            </form>
           </section>
           <section class="recommend-panel">
             <div class="section-heading small"><div><span class="section-kicker">BEST MATCH</span><h2>만들 수 있는 요리</h2></div></div>
