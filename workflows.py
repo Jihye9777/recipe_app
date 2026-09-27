@@ -125,13 +125,22 @@ class Pipelines:
         if not error:
             try: self.index.upsert(s['row'],s['vector'])
             except Exception as e: error=str(e)
-        self.store.indexed(s['row']['id'],'failed' if error else 'indexed',error or None)
+        self.store.indexed(s['row']['id'],'failed' if error else 'indexed',error or None,
+            self.index.backend,self.llm.embedding_model)
         row=self.store.get(s['row']['id'])
         return {'result':{'recipe':public(row),'index_error':error,'aiEnabled':True,'provider':self.llm.model}}
     def reindex(self,id):
         row=self.store.get(id)
         if not row: raise ValueError('레시피가 없습니다.')
         return self.index_row({'row':row,**self.embed({'row':row})})['result']
+    def reindex_all(self):
+        rows=self.store.needs_index(self.index.backend,self.llm.embedding_model)
+        indexed=0; failures=[]
+        for row in rows:
+            result=self.index_row({'row':row,**self.embed({'row':row})})['result']
+            if result['index_error']: failures.append({'id':row['id'],'error':result['index_error']})
+            else: indexed+=1
+        return {'total':len(rows),'indexed':indexed,'failed':len(failures),'failures':failures}
     def run(self,id,payload=None,resume=None):
         cfg={'configurable':{'thread_id':id}}
         self.store.job(id,status='running',error=None)

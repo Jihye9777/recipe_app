@@ -1,9 +1,8 @@
 """Read-only service readiness checks (never create collections or download models)."""
 import os
-from socket import create_connection
 import requests
 
-def service_health(store):
+def service_health(store, index):
     result={}
     try:
         with store.connect() as db:
@@ -21,12 +20,9 @@ def service_health(store):
     except Exception as e:
         result['ollama']={'ready':False,'model':model,'error':str(e)}
         result['embedding']={'ready':False,'model':embedding}
-    try:
-        url='http://'+os.getenv('WEAVIATE_HOST','127.0.0.1')+':'+os.getenv('WEAVIATE_HTTP_PORT','8080')+'/v1/.well-known/ready'
-        response=requests.get(url,timeout=(2,3));response.raise_for_status()
-        with create_connection((os.getenv('WEAVIATE_HOST','127.0.0.1'),int(os.getenv('WEAVIATE_GRPC_PORT','50051'))),timeout=2):
-            pass
-        result['weaviate']={'ready':True}
-    except Exception as e:result['weaviate']={'ready':False,'error':str(e)}
-    result['ready']=all(result[k]['ready'] for k in ('sqlite','ollama','embedding','weaviate'))
+    try: result['qdrant']=index.health()
+    except Exception as e:result['qdrant']={'ready':False,'backend':'qdrant-local','error':str(e)}
+    try: result['qdrant']['needsReindex']=len(store.needs_index(index.backend,embedding))
+    except Exception: result['qdrant']['needsReindex']=None
+    result['ready']=all(result[k]['ready'] for k in ('sqlite','ollama','embedding','qdrant'))
     return result

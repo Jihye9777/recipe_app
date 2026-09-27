@@ -22,6 +22,7 @@ class FakeLLM:
     def tips(self,rows,pantry): return '검증되지 않은 제안입니다.'
 
 class FakeIndex:
+    backend='fake-index'
     def __init__(self): self.rows={}; self.fail=False
     def upsert(self,row,vector):
         if self.fail: raise RuntimeError('index unavailable')
@@ -29,6 +30,8 @@ class FakeIndex:
     def search(self,query,filters):
         if self.fail: raise RuntimeError('index unavailable')
         return list(self.rows)
+    def health(self): return {'ready':True,'backend':self.backend,'vectors':len(self.rows)}
+    def close(self): pass
 
 class WorkflowTests(unittest.TestCase):
     def setUp(self):
@@ -95,6 +98,8 @@ class WorkflowTests(unittest.TestCase):
         self.graph.reindex(r['id']);self.graph.reindex(r['id'])
         self.assertEqual(len(self.index.rows),1);self.assertEqual(len(self.store.all()),1)
         self.assertEqual(self.store.get(r['id'])['index_status'],'indexed')
+        self.assertEqual(self.store.get(r['id'])['index_backend'],'fake-index')
+        self.assertEqual(self.graph.reindex_all()['total'],0)
 
     def test_embedding_failure_is_not_recipe_loss(self):
         self.llm.embed_fail=True

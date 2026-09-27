@@ -40,7 +40,7 @@ function showSavedRecipe(r) {
     catch(error){toast(error.message);e.target.disabled=false;}
   };
 }
-const stages={validate_url:'URL·중복 확인',extract_transcript:'자막 추출 / Whisper',preprocess:'자막 전처리',structure:'LLM 구조화·검증',normalize:'재료 정규화·품질 검사',repair:'LLM 재검토',review:'사용자 확인',persist:'SQLite 저장',embed:'임베딩 생성',index:'Weaviate 인덱싱'};
+const stages={validate_url:'URL·중복 확인',extract_transcript:'자막 추출 / Whisper',preprocess:'자막 전처리',structure:'LLM 구조화·검증',normalize:'재료 정규화·품질 검사',repair:'LLM 재검토',review:'사용자 확인',persist:'SQLite 저장',embed:'임베딩 생성',index:'Qdrant Local 인덱싱'};
 function failure(error,id) {
   qs('#analysis-area').innerHTML=`<div class="analysis-result"><h2>처리를 완료하지 못했어요</h2><p>${esc(error.message)}</p><p class="helper">YouTube 수집이 막힌 경우 자막/레시피 텍스트를 직접 붙여 넣을 수 있어요.</p>${id?'<button class="text-button" id="retry-job">중단된 단계 재시도</button>':''}</div>`;
   if(id) qs('#retry-job').onclick=async()=>{try{await api('/api/retry',{job_id:id});pollJob(id);}catch(e){toast(e.message);}};
@@ -107,8 +107,11 @@ async function refreshLlmStatus() {
 async function refreshServiceHealth() {
   try {
     const s=await api('/api/health');
-    const names={sqlite:'원본 DB',ollama:'레시피 AI',embedding:'임베딩',weaviate:'검색 DB'};
+    const names={sqlite:'원본 DB',ollama:'레시피 AI',embedding:'임베딩',qdrant:'검색 DB'};
     qs('#service-health').textContent=Object.entries(names).map(([key,label])=>`${label}: ${s[key].ready?'준비됨':'연결/설치 확인 필요'}`).join(' · ');
+    const button=qs('#reindex-all');
+    button.hidden=!s.qdrant.ready || !s.qdrant.needsReindex;
+    if(!button.hidden) button.textContent=`저장된 레시피 검색 인덱스 복구 (${s.qdrant.needsReindex}개)`;
   } catch(e){qs('#service-health').textContent=e.message;}
 }
 async function initialize() {
@@ -128,4 +131,10 @@ qs('#url-form').onsubmit=e=>{e.preventDefault();analyzeVideo(qs('#youtube-url').
 qs('#text-form').onsubmit=e=>{e.preventDefault();const text=qs('#source-text').value.trim();if(text)analyzeVideo('',text);};
 qs('#ingredient-form').onsubmit=e=>{e.preventDefault();const v=qs('#ingredient-input').value.trim();if(v)savePantry([...pantry,v]);qs('#ingredient-input').value='';};
 qs('#search-form').onsubmit=e=>{e.preventDefault();renderRecommendations();};
+qs('#reindex-all').onclick=async e=>{
+  e.target.disabled=true;e.target.textContent='검색 인덱스를 복구하고 있어요…';
+  try{const out=await api('/api/reindex-all',{});toast(`${out.indexed}개 색인 완료 · 실패 ${out.failed}개`);await refreshRecipes();await refreshServiceHealth();}
+  catch(error){toast(error.message);}
+  finally{e.target.disabled=false;}
+};
 initialize();refreshLlmStatus();refreshServiceHealth();setInterval(refreshLlmStatus,15000);setInterval(refreshServiceHealth,30000);

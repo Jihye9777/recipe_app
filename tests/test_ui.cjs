@@ -18,11 +18,12 @@ async function main(){
     if(url==='/api/recipes')out={recipes:saved};
     else if(url==='/api/pantry'){if(body)pantry=body.pantry;out={pantry};}
     else if(url==='/api/status')out={running:true,modelInstalled:true,model:'fixture'};
-    else if(url==='/api/health')out={sqlite:{ready:true},ollama:{ready:true},embedding:{ready:true},weaviate:{ready:false}};
+    else if(url==='/api/health')out={sqlite:{ready:true},ollama:{ready:true},embedding:{ready:true},qdrant:{ready:true,needsReindex:1}};
     else if(url==='/api/analyze')out={job_id:'job1'};
-    else if(url==='/api/jobs/job1')out=state==='review'?{id:'job1',status:'review',result:{recipe:structured,issues:['확인 필요'],transcript:'달걀 2개'}}:{id:'job1',status:'complete',result:{recipe,index_error:'Weaviate 연결 실패'}};
+    else if(url==='/api/jobs/job1')out=state==='review'?{id:'job1',status:'review',result:{recipe:structured,issues:['확인 필요'],transcript:'달걀 2개'}}:{id:'job1',status:'complete',result:{recipe,index_error:'Qdrant 저장 실패'}};
     else if(url==='/api/review'){reviewSent=body;state='complete';out={job_id:'job1'};}
     else if(url==='/api/reindex')out={recipe:{...recipe,index_status:'indexed'},index_error:''};
+    else if(url==='/api/reindex-all')out={total:1,indexed:1,failed:0,failures:[]};
     else if(url==='/api/search')out={recipes:[{...recipe,missing:[],coverage:100}],warnings:['재료 기준 폴백'],tips:''};
     else throw new Error('Unexpected request: '+url);
     return{ok:true,status:200,text:async()=>JSON.stringify(out)};
@@ -56,7 +57,8 @@ async function main(){
     await waitFor(()=>w.document.querySelector('#index-message')?.textContent.includes('SQLite 원본은 저장'));
     assert.equal(reviewSent.approved,true);
     assert.equal(w.localStorage.getItem('hanip-job-id'),null);
-    assert.ok(w.document.querySelector('#service-health').textContent.includes('검색 DB: 연결/설치 확인 필요'));
+    assert.ok(w.document.querySelector('#service-health').textContent.includes('검색 DB: 준비됨'));
+    assert.equal(w.document.querySelector('#reindex-all').hidden,false);
     console.log('PASS: SQL detail, HTML escaping, reindex, pantry, search filters, review validation/resume, saved-with-index-failure, health status');
   }finally{w.close();}
 }

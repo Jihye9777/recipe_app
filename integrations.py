@@ -1,6 +1,8 @@
 import os
 import json
 import requests
+from pathlib import Path
+from threading import RLock
 from domain import Recipe
 
 class Ollama:
@@ -32,41 +34,55 @@ class Ollama:
             '대체안은 검증되지 않은 제안이라고 명시하세요. 원본 레시피를 변경하지 마세요. '
             '부족 재료를 보유했다고 말하지 마세요.\n' + json.dumps({'recipes':rows,'pantry':pantry},ensure_ascii=False),schema)['text']
 
-class WeaviateIndex:
-    def __init__(self, ollama): self.ollama = ollama
-    def connect(self):
-        import weaviate
-        from weaviate.classes.init import AdditionalConfig, Timeout
-        return weaviate.connect_to_local(host=os.getenv('WEAVIATE_HOST','127.0.0.1'),
-            port=int(os.getenv('WEAVIATE_HTTP_PORT','8080')),grpc_port=int(os.getenv('WEAVIATE_GRPC_PORT','50051')),
-            additional_config=AdditionalConfig(timeout=Timeout(init=5,query=15,insert=20)))
-    def collection(self, client):
-        from weaviate.classes.config import Configure, Property, DataType, Tokenization
-        name = os.getenv('WEAVIATE_COLLECTION','RecipeV1')
-        if not client.collections.exists(name):
-            client.collections.create(name, vector_config=Configure.Vectors.self_provided(), properties=[
-                Property(name='recipe_id',data_type=DataType.TEXT,tokenization=Tokenization.FIELD),
-                Property(name='title',data_type=DataType.TEXT), Property(name='search_text',data_type=DataType.TEXT),
-                Property(name='ingredient_names',data_type=DataType.TEXT_ARRAY,tokenization=Tokenization.FIELD),
-                Property(name='spice_level',data_type=DataType.INT), Property(name='time_minutes',data_type=DataType.INT),
-                Property(name='semantic_version',data_type=DataType.TEXT,tokenization=Tokenization.FIELD),Property(name='embedding_model',data_type=DataType.TEXT,tokenization=Tokenization.FIELD)])
-        return client.collections.get(name)
+class QdrantIndex:
+    backend = 'qdrant-local'
+    def __init__(self, ollama, path=None):
+        from qdrant_client import QdrantClient
+        self.ollama = ollama
+        default_path = Path(__file__).resolve().parent / 'data' / 'qdrant'
+        self.path = Path(path or os.getenv('QDRANT_PATH', str(default_path))).resolve()
+        self.path.mkdir(parents=True, exist_ok=True)
+        self.collection_name = os.getenv('QDRANT_COLLECTION', 'RecipeV1')
+        self.lock = RLock()
+        self.client = QdrantClient(path=str(self.path), force_disable_check_same_thread=True)
+    def ensure_collection(self, vector_size):
+        from qdrant_client.models import VectorParams, Distance
+        if not self.client.collection_exists(self.collection_name):
+            self.client.create_collection(self.collection_name,
+                vectors_config=VectorParams(size=vector_size,distance=Distance.COSINE))
+            return
+        vectors = self.client.get_collection(self.collection_name).config.params.vectors
+        current_size = getattr(vectors, 'size', None)
+        if current_size is not None and current_size != vector_size:
+            raise RuntimeError(f'임베딩 차원이 달라요({current_size} != {vector_size}). QDRANT_COLLECTION을 새 이름으로 설정해 주세요.')
     def upsert(self, row, vector):
-        with self.connect() as client:
-            c = self.collection(client)
-            props = {'recipe_id':row['id'],'title':row['recipe']['title'],'search_text':row['semantic']['search_text'],
+        from qdrant_client.models import PointStruct
+        with self.lock:
+            self.ensure_collection(len(vector))
+            payload = {'recipe_id':row['id'],'title':row['recipe']['title'],'search_text':row['semantic']['search_text'],
                 'ingredient_names':[x['name'] for x in row['recipe']['ingredients']],
                 'semantic_version':row['semantic']['version'],'embedding_model':self.ollama.embedding_model}
-            if row['recipe']['time'] is not None: props['time_minutes'] = row['recipe']['time']
-            if row['semantic']['spice_level'] is not None: props['spice_level'] = row['semantic']['spice_level']
-            if c.data.exists(row['id']): c.data.replace(row['id'],properties=props,vector=vector)
-            else: c.data.insert(props,uuid=row['id'],vector=vector)
+            if row['recipe']['time'] is not None: payload['time_minutes'] = row['recipe']['time']
+            if row['semantic']['spice_level'] is not None: payload['spice_level'] = row['semantic']['spice_level']
+            self.client.upsert(self.collection_name,
+                points=[PointStruct(id=row['id'],vector=vector,payload=payload)],wait=True)
     def search(self, query, filters):
-        from weaviate.classes.query import Filter
-        with self.connect() as client:
-            c = self.collection(client)
-            where = Filter.by_property('embedding_model').equal(self.ollama.embedding_model)
-            if filters.max_time is not None: where &= Filter.by_property('time_minutes').less_or_equal(filters.max_time)
-            if filters.min_spice is not None: where &= Filter.by_property('spice_level').greater_or_equal(filters.min_spice)
-            result = c.query.hybrid(query=query,vector=self.ollama.embed(query),alpha=0.35,filters=where,limit=50)
-            return [str(x.uuid) for x in result.objects]
+        from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
+        vector = self.ollama.embed(query)
+        with self.lock:
+            if not self.client.collection_exists(self.collection_name): return []
+            must=[FieldCondition(key='embedding_model',match=MatchValue(value=self.ollama.embedding_model))]
+            if filters.max_time is not None: must.append(FieldCondition(key='time_minutes',range=Range(lte=filters.max_time)))
+            if filters.min_spice is not None: must.append(FieldCondition(key='spice_level',range=Range(gte=filters.min_spice)))
+            result=self.client.query_points(self.collection_name,query=vector,
+                query_filter=Filter(must=must),limit=50,with_payload=False,with_vectors=False)
+            return [str(x.id) for x in result.points]
+    def health(self):
+        with self.lock:
+            exists=self.client.collection_exists(self.collection_name)
+            count=self.client.count(self.collection_name,exact=True).count if exists else 0
+            return {'ready':True,'backend':self.backend,'path':str(self.path),
+                    'collection':self.collection_name,'collectionExists':exists,'vectors':count}
+    def close(self):
+        with self.lock:
+            self.client.close()

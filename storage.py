@@ -24,6 +24,11 @@ class Store:
             ''')
             if 'payload' not in {x['name'] for x in db.execute('PRAGMA table_info(jobs)')}:
                 db.execute('ALTER TABLE jobs ADD COLUMN payload TEXT')
+            recipe_columns={x['name'] for x in db.execute('PRAGMA table_info(recipes)')}
+            if 'index_backend' not in recipe_columns:
+                db.execute('ALTER TABLE recipes ADD COLUMN index_backend TEXT')
+            if 'embedding_model' not in recipe_columns:
+                db.execute('ALTER TABLE recipes ADD COLUMN embedding_model TEXT')
     @contextmanager
     def connect(self):
         db = sqlite3.connect(self.path, timeout=20)
@@ -52,9 +57,15 @@ class Store:
             db.execute('INSERT OR IGNORE INTO recipes(id,source_key,source_url,transcript,recipe,semantic,model) VALUES(?,?,?,?,?,?,?)',
                        (id,key,url,transcript,json.dumps(recipe,ensure_ascii=False),json.dumps(semantic,ensure_ascii=False),model))
         return self.find(key)
-    def indexed(self, id, status, error=None):
+    def indexed(self, id, status, error=None, backend=None, embedding_model=None):
         with self.connect() as db:
-            db.execute('UPDATE recipes SET index_status=?, index_error=? WHERE id=?', (status,error,id))
+            db.execute('UPDATE recipes SET index_status=?, index_error=?, index_backend=?, embedding_model=? WHERE id=?',
+                       (status,error,backend,embedding_model,id))
+    def needs_index(self, backend, embedding_model):
+        with self.connect() as db:
+            rows=db.execute('SELECT * FROM recipes WHERE index_status != ? OR index_backend IS NOT ? OR embedding_model IS NOT ? ORDER BY created_at,id',
+                            ('indexed',backend,embedding_model)).fetchall()
+            return [self.unpack(x) for x in rows]
     def pantry(self, items=None):
         with self.connect() as db:
             if items is not None:
@@ -82,4 +93,5 @@ def public(row):
             'ingredient_details': r['ingredients'],
             'ingredients': [' '.join(str(v) for v in (x['name'],x['quantity'],x['unit']) if v is not None) for x in r['ingredients']],
             'semantic': row['semantic'], 'index_status': row['index_status'],
+            'index_backend': row.get('index_backend'), 'embedding_model': row.get('embedding_model'),
             'palette': ['#c05b3e','#efaa62','#733a2d'], 'emoji': '🍳'}

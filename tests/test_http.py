@@ -53,6 +53,8 @@ class HTTPTests(unittest.TestCase):
         code,out=self.request('/api/search',{'pantry':['계란'],'max_missing':0});self.assertEqual(code,200)
         self.assertEqual(out['recipes'][0]['coverage'],100)
         self.assertEqual(self.request('/api/reindex',{'id':rows['recipes'][0]['id']})[0],200)
+        code,out=self.request('/api/reindex-all',{})
+        self.assertEqual(code,200);self.assertEqual(out['failed'],0)
     def test_private_files_not_served(self):
         for path in ['/server.py','/data/recipe.db','/data/checkpoints.db','/.runtime/audio.mp4','/../server.py','/%73erver.py']:
             self.assertEqual(self.request(path)[0],404,path)
@@ -61,7 +63,7 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(code,422);self.assertIn('error',json.loads(out))
         self.assertEqual(self.request('/api/jobs/not-found')[0],404)
     def test_health_checks_components(self):
-        with patch('health.requests.get') as get, patch('health.create_connection'):
+        with patch('health.requests.get') as get:
             get.return_value.json.return_value={'models':[{'name':'gemma4:latest'},{'name':'embeddinggemma:latest'}]}
             code,out=self.request('/api/health')
             self.assertEqual(code,200);self.assertTrue(out['ready'])

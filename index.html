@@ -30,7 +30,7 @@
     </header>
 
     <main>
-      <p id="service-health" class="helper" role="status">저장소·모델·검색 DB 상태 확인 중…</p>
+      <p id="service-health" class="helper" role="status">SQLite·Ollama·Qdrant Local 상태 확인 중…</p>
       <section class="view active" id="home-view">
         <div class="intro-row">
           <div>
@@ -52,6 +52,7 @@
           <span class="count-pill" id="recipe-count">3개의 레시피</span>
         </div>
         <button class="text-button" id="migrate" hidden>이 브라우저의 예전 레시피를 SQLite로 가져오기</button>
+        <button class="text-button" id="reindex-all" hidden>저장된 레시피 검색 인덱스 복구</button>
         <div class="recipe-grid" id="recipe-grid" aria-live="polite"></div>
       </section>
 

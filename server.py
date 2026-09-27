@@ -11,7 +11,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from storage import Store, public
-from integrations import Ollama, WeaviateIndex
+from integrations import Ollama, QdrantIndex
 from workflows import Pipelines
 from domain import normalize, semantic, canonical, SearchInput
 from health import service_health
@@ -45,7 +45,7 @@ def pipelines():
     global PIPELINES
     if PIPELINES is None:
         llm = Ollama()
-        PIPELINES = Pipelines(STORE, llm, WeaviateIndex(llm), extract_transcript, str(DATA_DIR / 'checkpoints.db'))
+        PIPELINES = Pipelines(STORE, llm, QdrantIndex(llm,DATA_DIR / 'qdrant'), extract_transcript, str(DATA_DIR / 'checkpoints.db'))
     return PIPELINES
 
 def submit_job(id, payload=None, resume=None):
@@ -151,7 +151,7 @@ class RecipeHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         route = self.path.split('?',1)[0]
         if route == '/api/health':
-            self.send_json(200,service_health(STORE)); return
+            self.send_json(200,service_health(STORE,pipelines().index)); return
         if route == '/api/recipes':
             self.send_json(200, {'recipes':[public(r) for r in STORE.all()]}); return
         if route == '/api/pantry':
@@ -213,6 +213,9 @@ class RecipeHandler(SimpleHTTPRequestHandler):
             if self.path == '/api/reindex':
                 future=WORKER.submit(lambda:pipelines().reindex(body['id']))
                 self.send_json(200,future.result()); return
+            if self.path == '/api/reindex-all':
+                future=WORKER.submit(lambda:pipelines().reindex_all())
+                self.send_json(200,future.result()); return
             if self.path == '/api/import':
                 count=0; errors=[]
                 for old in body.get('recipes',[]):
@@ -234,10 +237,12 @@ class RecipeHandler(SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     httpd = ThreadingHTTPServer(("127.0.0.1", 8000), RecipeHandler)
     print("한입노트가 http://localhost:8000 에서 실행 중입니다.", flush=True)
-    print("SQLite 원본 DB + LangGraph + 로컬 Ollama + Weaviate 검색 인덱스", flush=True)
+    print("SQLite 원본 DB + LangGraph + 로컬 Ollama + Qdrant Local 검색 인덱스", flush=True)
     try: httpd.serve_forever()
     except KeyboardInterrupt: print("서버를 종료합니다.", flush=True)
     finally:
         httpd.server_close()
         WORKER.shutdown(wait=True)
-        if PIPELINES: PIPELINES.checkpoint_db.close()
+        if PIPELINES:
+            PIPELINES.checkpoint_db.close()
+            PIPELINES.index.close()
