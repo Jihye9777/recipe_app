@@ -1,3 +1,5 @@
+"""한입노트의 로컬 HTTP API, 정적 파일 제공, YouTube 수집 진입점."""
+
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -8,6 +10,7 @@ import os
 import re
 import tempfile
 import uuid
+from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from storage import Store, public
@@ -16,14 +19,16 @@ from workflows import Pipelines
 from domain import normalize, semantic, canonical, SearchInput
 from health import service_health
 
+ROOT = Path(__file__).resolve().parent
+os.chdir(ROOT)
+load_dotenv(ROOT / '.env')
+
 # This personal app must not send recipe/checkpoint content to cloud tracing services.
 os.environ['LANGSMITH_TRACING'] = 'false'
 os.environ['LANGCHAIN_TRACING_V2'] = 'false'
 
-ROOT = Path(__file__).resolve().parent
-os.chdir(ROOT)
 # Windows TEMP 권한 문제를 피하기 위해 앱 임시 파일을 전용 폴더에 만듭니다.
-RUNTIME_DIR = ROOT / ".runtime"
+RUNTIME_DIR = Path(os.environ.get('RECIPE_RUNTIME_DIR', str(ROOT / '.runtime'))).resolve()
 RUNTIME_DIR.mkdir(exist_ok=True)
 os.environ["TEMP"] = str(RUNTIME_DIR)
 os.environ["TMP"] = str(RUNTIME_DIR)
@@ -42,18 +47,55 @@ ACTIVE = set()
 ACTIVE_LOCK = Lock()
 
 def pipelines():
+    """공유 LangGraph 파이프라인 묶음을 최초 요청 시 한 번 생성한다.
+
+    Returns:
+        SQLite 저장소, Ollama, Qdrant Local, 자막 추출기와 체크포인트 DB가
+        연결된 :class:`workflows.Pipelines` 싱글턴.
+
+    Side Effects:
+        첫 호출에서 Qdrant Local 파일 잠금과 체크포인트 SQLite 연결을 연다.
+        이후 호출은 동일 객체를 반환한다.
+    """
     global PIPELINES
     if PIPELINES is None:
         llm = Ollama()
-        PIPELINES = Pipelines(STORE, llm, QdrantIndex(llm,DATA_DIR / 'qdrant'), extract_transcript, str(DATA_DIR / 'checkpoints.db'))
+        qdrant_path = os.environ.get('QDRANT_PATH')
+        PIPELINES = Pipelines(STORE, llm, QdrantIndex(llm,qdrant_path or DATA_DIR / 'qdrant'), extract_transcript, str(DATA_DIR / 'checkpoints.db'))
     return PIPELINES
 
 def submit_job(id, payload=None, resume=None):
+    """수집 그래프 실행·재개를 단일 백그라운드 작업자에게 제출한다.
+
+    Args:
+        id: jobs 테이블과 LangGraph thread ID로 사용할 작업 UUID.
+        payload: 새 작업 입력 ``{'url': str, 'text': str}``. 재시도 또는 검토
+            재개에서는 ``None``일 수 있다.
+        resume: 사용자 확인을 재개할 승인·수정 사전. 일반 실행에서는 ``None``.
+
+    Returns:
+        반환값 없음. 실제 결과와 오류는 ``jobs`` 테이블에서 조회한다.
+
+    Raises:
+        ValueError: 동일 ID의 작업이 현재 프로세스에서 이미 실행 중일 때.
+
+    Side Effects:
+        작업을 queued로 기록하고 ``WORKER`` 큐에 추가한다.
+    """
     with ACTIVE_LOCK:
         if id in ACTIVE: raise ValueError('이미 처리 중인 작업입니다.')
         ACTIVE.add(id)
         STORE.job(id,status='queued')
     def work():
+        """백그라운드 스레드에서 그래프를 실행하고 활성 작업 표시를 정리한다.
+
+        Returns:
+            반환값 없음.
+
+        Notes:
+            그래프 바깥까지 나온 예외는 jobs의 failed 상태로 저장하며, 성공과
+            실패 모두 ``ACTIVE`` 집합에서 작업 ID를 제거한다.
+        """
         try: pipelines().run(id,payload,resume)
         except Exception as e: STORE.job(id,status='failed',error=str(e))
         finally:
@@ -61,6 +103,16 @@ def submit_job(id, payload=None, resume=None):
     WORKER.submit(work)
 
 def video_id_from_url(value):
+    """여러 YouTube URL 표현에서 영상 ID 후보를 추출한다.
+
+    Args:
+        value: 파싱할 URL 문자열.
+
+    Returns:
+        공유 URL 경로, ``v`` 쿼리, embed/shorts/live 경로에서 찾은 ID 문자열.
+        ID 후보가 없으면 ``None``. 길이와 호스트의 엄격한 검증은
+        :func:`workflows.valid_video`에서 수행한다.
+    """
     parsed = urlparse(value)
     if parsed.hostname in {"youtu.be", "www.youtu.be"}:
         return parsed.path.strip("/").split("/")[0]
@@ -71,14 +123,45 @@ def video_id_from_url(value):
     return match.group(1) if match else None
 
 def transcript_from_youtube_transcript_api(video_id):
-    """가벼운 자막 전용 라이브러리로 먼저 시도합니다."""
+    """youtube-transcript-api로 공개 한국어·영어 자막을 가져온다.
+
+    Args:
+        video_id: 자막을 요청할 YouTube 영상 ID.
+
+    Returns:
+        ``(자막 전체 문자열, 언어 코드, 사용자 표시용 출처 설명)`` 튜플.
+        각 자막 조각의 빈 텍스트를 제외하고 공백으로 연결한다.
+
+    Raises:
+        RuntimeError: 라이브러리가 없거나 반환된 자막이 비어 있을 때.
+        youtube_transcript_api의 예외: 자막 부재, 비공개 영상, 요청 차단 등.
+
+    Notes:
+        시스템 프록시 환경변수를 사용하지 않으며 요청 기본 제한 시간은
+        연결 5초, 읽기 20초이다.
+    """
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
         from requests import Session
     except ImportError:
         raise RuntimeError("youtube-transcript-api가 설치되어 있지 않아요.")
     class TranscriptSession(Session):
+        """모든 자막 HTTP 요청에 기본 timeout을 추가하는 requests 세션."""
+
         def request(self, *args, **kwargs):
+            """requests의 원래 인자를 전달하되 timeout이 없으면 기본값을 넣는다.
+
+            Args:
+                *args: ``requests.Session.request``의 위치 인자.
+                **kwargs: 동일 메서드의 키워드 인자. ``timeout``을 직접 주면
+                    호출자 값을 유지한다.
+
+            Returns:
+                ``requests.Response`` 객체.
+
+            Raises:
+                requests.RequestException: HTTP 요청에 실패했을 때.
+            """
             kwargs.setdefault('timeout',(5,20))
             return super().request(*args,**kwargs)
     # requests가 시스템 프록시 환경 변수를 따르지 않도록 합니다.
@@ -91,7 +174,23 @@ def transcript_from_youtube_transcript_api(video_id):
     return transcript, fetched.language_code, f"YouTube 자막 · {fetched.language}"
 
 def transcript_from_local_whisper(video_url):
-    """자막이 없는 영상에서 오디오만 임시로 받아 로컬 Whisper로 변환합니다."""
+    """YouTube 오디오를 임시 다운로드하고 로컬 Whisper로 텍스트화한다.
+
+    Args:
+        video_url: pytubefix가 열 수 있는 정규화된 YouTube URL.
+
+    Returns:
+        ``(한국어 인식 문자열, 'ko', 사용자 표시용 Whisper 출처)`` 튜플.
+
+    Raises:
+        RuntimeError: 의존 패키지·오디오 스트림·인식 텍스트가 없을 때.
+        pytubefix 또는 faster_whisper의 예외: 다운로드나 음성 인식에 실패할 때.
+
+    Side Effects:
+        오디오를 ``RUNTIME_DIR``에 임시 저장하고 Whisper 모델을
+        ``RUNTIME_DIR/whisper-models``에 캐시한다. 오디오는 성공·실패와
+        관계없이 가능한 경우 삭제한다.
+    """
     try:
         from faster_whisper import WhisperModel
         from pytubefix import YouTube
@@ -127,6 +226,19 @@ def transcript_from_local_whisper(video_url):
                 pass
 
 def extract_transcript(video_url):
+    """자막 API를 우선 사용하고 실패하면 로컬 Whisper로 폴백한다.
+
+    Args:
+        video_url: 사용자가 제출한 YouTube URL.
+
+    Returns:
+        성공한 수집기의 ``(텍스트, 언어 코드, 출처 설명)`` 튜플.
+
+    Raises:
+        ValueError: URL에서 영상 ID를 얻지 못할 때.
+        RuntimeError: 자막 API와 로컬 Whisper가 모두 실패했을 때. 메시지에는
+            두 실패 원인이 함께 포함된다.
+    """
     video_id = video_id_from_url(video_url)
     if not video_id:
         raise ValueError("유효한 YouTube 주소를 입력해 주세요.")
@@ -140,7 +252,18 @@ def extract_transcript(video_url):
         raise RuntimeError(f"자막 API: {subtitle_error} / 로컬 Whisper: {whisper_error}")
 
 class RecipeHandler(SimpleHTTPRequestHandler):
+    """한입노트 JSON API와 허용된 정적 파일만 제공하는 HTTP 핸들러."""
+
     def send_json(self, status, body):
+        """Python 값을 UTF-8 JSON HTTP 응답으로 전송한다.
+
+        Args:
+            status: HTTP 상태 코드 정수.
+            body: ``json.dumps``로 직렬화 가능한 응답 값.
+
+        Returns:
+            반환값 없음. 상태·헤더·본문을 클라이언트 소켓에 쓴다.
+        """
         encoded = json.dumps(body, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -149,6 +272,17 @@ class RecipeHandler(SimpleHTTPRequestHandler):
         self.wfile.write(encoded)
 
     def do_GET(self):
+        """상태·레시피·냉장고·작업 조회 또는 허용된 정적 파일을 처리한다.
+
+        Returns:
+            반환값 없음. 경로에 따라 JSON/정적 파일 응답을 직접 전송한다.
+
+        Routes:
+            ``/api/health`` 전체 준비 상태, ``/api/recipes`` 레시피 목록,
+            ``/api/pantry`` 냉장고, ``/api/jobs/<id>`` 작업 상태,
+            ``/api/status`` Ollama 모델 상태를 반환한다. 그 외에는 명시적으로
+            허용한 UI 파일만 제공하고 내부 파일은 404로 차단한다.
+        """
         route = self.path.split('?',1)[0]
         if route == '/api/health':
             self.send_json(200,service_health(STORE,pipelines().index)); return
@@ -178,9 +312,31 @@ class RecipeHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_HEAD(self):
+        """HEAD 요청을 지원하지 않고 405 Method Not Allowed를 반환한다.
+
+        Returns:
+            반환값 없음. 오류 응답을 직접 전송한다.
+        """
         self.send_error(405)
 
     def do_POST(self):
+        """JSON 기반 변경·분석·검색 API 요청을 검증하고 라우팅한다.
+
+        Returns:
+            반환값 없음. 각 경로의 JSON 응답을 직접 전송한다.
+
+        Routes:
+            ``/api/analyze`` 작업 생성, ``/api/review`` 사용자 확인 재개,
+            ``/api/retry`` 실패 작업 재시도, ``/api/pantry`` 냉장고 교체,
+            ``/api/search`` 추천, ``/api/reindex`` 개별 재색인,
+            ``/api/reindex-all`` 전체 재색인, ``/api/import`` 과거 브라우저
+            레시피 이관을 처리한다.
+
+        Error Responses:
+            Content-Type 오류는 415, 입력·업무 규칙 오류는 422, 외부 연결
+            오류는 502, 예상하지 못한 예외는 500 JSON으로 변환한다. 요청
+            본문은 1바이트 이상 2MB 이하의 JSON 객체여야 한다.
+        """
         try:
             if self.headers.get('Content-Type','').split(';')[0] != 'application/json':
                 self.send_json(415,{'error':'application/json 요청만 지원합니다.'}); return
@@ -235,8 +391,11 @@ class RecipeHandler(SimpleHTTPRequestHandler):
             self.send_json(500, {"error": "분석 중 알 수 없는 오류가 발생했어요.", "detail": str(error)})
 
 if __name__ == "__main__":
-    httpd = ThreadingHTTPServer(("127.0.0.1", 8000), RecipeHandler)
-    print("한입노트가 http://localhost:8000 에서 실행 중입니다.", flush=True)
+    host = os.environ.get('APP_HOST', '127.0.0.1')
+    port = int(os.environ.get('APP_PORT', '8000'))
+    httpd = ThreadingHTTPServer((host, port), RecipeHandler)
+    display_host = 'localhost' if host in {'127.0.0.1','localhost'} else host
+    print(f"한입노트가 http://{display_host}:{port} 에서 실행 중입니다.", flush=True)
     print("SQLite 원본 DB + LangGraph + 로컬 Ollama + Qdrant Local 검색 인덱스", flush=True)
     try: httpd.serve_forever()
     except KeyboardInterrupt: print("서버를 종료합니다.", flush=True)

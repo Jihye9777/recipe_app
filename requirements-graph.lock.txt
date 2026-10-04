@@ -60,6 +60,7 @@ pydantic==2.13.5
 pydantic_core==2.46.5
 pytubefix==11.1.0
 pywin32==312
+python-dotenv==1.2.3
 PyYAML==6.0.3
 qdrant-client==1.19.1
 requests==2.34.2

@@ -43,11 +43,11 @@ ollama list
 ollama pull embeddinggemma
 ```
 
-기본 생성 모델은 `gemma4:latest`, 임베딩 모델은 `embeddinggemma`입니다. 설치된 이름이 다르면 앱을 실행할 터미널에서 설정합니다.
+기본 생성 모델은 `gemma4:latest`, 임베딩 모델은 `embeddinggemma`입니다. 설치된 이름이 다르면 프로젝트 루트의 `.env`를 수정합니다. 서버가 시작될 때 `.env`를 자동으로 읽으며, 터미널 환경 변수가 이미 있으면 그 값을 우선합니다.
 
-```powershell
-$env:OLLAMA_MODEL = "gemma4:latest"
-$env:EMBEDDING_MODEL = "embeddinggemma"
+```dotenv
+OLLAMA_MODEL=gemma4:latest
+EMBEDDING_MODEL=embeddinggemma
 ```
 
 생성과 임베딩 모두 로컬 Ollama만 사용하며 유료 API로 자동 전환하지 않습니다. 앱 실행:
@@ -105,11 +105,11 @@ SQLite 저장 후 벡터 생성이 실패해도 원본은 남습니다. `recipes
 
 기본 컬렉션은 `RecipeV1`입니다. SQLite UUID를 point ID로 쓰고 벡터와 제목, 검색 텍스트, 재료명, 맵기, 시간, 시맨틱 버전, 임베딩 모델을 payload로 저장합니다. 같은 ID를 upsert하므로 재색인해도 중복되지 않습니다. `data/qdrant/`를 잃어도 SQLite 원본으로 복구할 수 있습니다.
 
-임베딩 모델을 변경할 때는 기존 벡터와 섞지 말고 새 컬렉션을 사용한 뒤 전체 재색인합니다.
+임베딩 모델을 변경할 때는 기존 벡터와 섞지 말고 `.env`에서 새 컬렉션을 사용한 뒤 서버를 재시작하고 전체 재색인합니다.
 
-```powershell
-$env:EMBEDDING_MODEL = "새_임베딩_모델"
-$env:QDRANT_COLLECTION = "RecipeV2"
+```dotenv
+EMBEDDING_MODEL=새_임베딩_모델
+QDRANT_COLLECTION=RecipeV2
 ```
 
 ## 5. 파이프라인 2 — 검색·추천
@@ -127,8 +127,14 @@ $env:QDRANT_COLLECTION = "RecipeV2"
 
 ## 6. 환경 변수
 
+실제 PC 설정은 Git에서 제외되는 `.env`에 저장합니다. `.env.example`은 설정 항목과 기본값을 공유하기 위한 예시 파일입니다. 값을 바꾼 뒤에는 서버를 재시작해야 합니다.
+
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
+| `APP_HOST` | `127.0.0.1` | 웹 서버 바인딩 주소. 개인 앱에서는 변경하지 않는 것을 권장 |
+| `APP_PORT` | `8000` | 웹 앱 포트 |
+| `RECIPE_DATA_DIR` | `data` | SQLite·체크포인트 저장 폴더 |
+| `RECIPE_RUNTIME_DIR` | `.runtime` | 임시 음성·Whisper 모델 캐시 폴더 |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama 주소 |
 | `OLLAMA_MODEL` | `gemma4:latest` | 구조화·팁 모델 |
 | `EMBEDDING_MODEL` | `embeddinggemma` | 임베딩 모델 |

@@ -13,11 +13,18 @@ from integrations import Ollama, QdrantIndex
 from storage import Store
 
 def fixture_recipe():
+    """실제 임베딩·Qdrant 검사에 사용할 정규화된 고정 레시피를 반환한다."""
     return normalize({'title':'통합 검사 레시피','time':5,
         'ingredients':[{'raw_name':'청양고추','name':'청양고추','evidence':'청양고추 1개'}],
         'steps':['청양고추 1개를 볶아요.']})
 
 def main():
+    """CLI 플래그에 따라 Ollama, Qdrant 또는 전체 워크플로 통합 검사를 실행한다.
+
+    입력은 명령행의 ``--ollama``, ``--qdrant``, ``--workflow`` 플래그이며,
+    성공 결과는 stdout JSON으로 출력한다. 검증 실패 시 ``AssertionError``
+    또는 연동 예외를 전파하고, 임시 SQLite·Qdrant 폴더는 자동 삭제한다.
+    """
     parser=argparse.ArgumentParser()
     parser.add_argument('--ollama',action='store_true')
     parser.add_argument('--qdrant',action='store_true')
