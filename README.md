@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 한입노트 — 로컬 레시피 북
 
 YouTube URL 또는 직접 붙여 넣은 텍스트를 레시피로 정리하고, 냉장고 재료로 검색·추천하는 개인용 로컬 웹 앱입니다.
@@ -177,3 +178,6 @@ QDRANT_COLLECTION=RecipeV2
 - [LangGraph 워크플로와 에이전트](https://docs.langchain.com/oss/python/langgraph/workflows-agents)
 - [LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
 - [Ollama 임베딩 API](https://docs.ollama.com/api/embed)
+=======
+# recipe_app
+>>>>>>> origin/main
