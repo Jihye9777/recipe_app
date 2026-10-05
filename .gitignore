@@ -1,0 +1,10 @@
+# Python cache / compiled files
+__pycache__/
+*.py[cod]
+*.pyc
+
+# App runtime temporary files
+.runtime/
+data/
+.env
+.venv-graph/

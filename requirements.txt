@@ -1,0 +1,6 @@
+# YouTube transcript extraction
+youtube-transcript-api==1.2.4
+
+# Audio download and local speech recognition fallback (no yt-dlp)
+pytubefix==11.1.0
+faster-whisper==1.2.1

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f5f0e7" />
+  <meta name="description" content="영상 속 레시피를 정리하고, 냉장고 재료로 오늘의 요리를 추천받는 나만의 레시피 북" />
+  <meta property="og:title" content="한입노트" />
+  <meta property="og:description" content="영상은 그대로, 레시피는 한눈에." />
+  <meta property="og:image" content="http://localhost:8000/assets/og.png" />
+  <title>한입노트 — 나만의 레시피 북</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@700&family=Pretendard:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <button class="brand" data-view="home" aria-label="한입노트 홈">
+        <span class="brand-mark">한</span>
+        <span>한입노트</span>
+      </button>
+      <nav aria-label="주요 메뉴">
+        <button class="nav-link active" data-view="home">레시피 북</button>
+        <button class="nav-link" data-view="import">영상 가져오기</button>
+        <button class="nav-link" data-view="pantry">내 냉장고</button>
+      </nav>
+      <div class="top-actions"><span class="llm-status checking" id="llm-status"><i></i>로컬 AI 확인 중</span><button class="round-button" id="open-import" aria-label="새 레시피 추가">＋</button></div>
+    </header>
+
+    <main>
+      <p id="service-health" class="helper" role="status">SQLite·Ollama·Qdrant Local 상태 확인 중…</p>
+      <section class="view active" id="home-view">
+        <div class="intro-row">
+          <div>
+            <p class="eyebrow">MY KITCHEN ARCHIVE</p>
+            <h1>오늘도 맛있는<br /><em>한 페이지</em>를 채워요.</h1>
+            <p class="subcopy">영상에서 발견한 레시피를 꺼내 보기 좋게 정리하고,<br class="desktop-only" /> 가진 재료로 다음 요리를 골라보세요.</p>
+          </div>
+          <div class="hero-visual">
+            <img src="assets/og.png" alt="따뜻한 한 그릇 요리와 한입노트 레시피 카드" />
+            <button class="pantry-spotlight" data-view="pantry">
+              <span class="spotlight-icon">♨</span>
+              <span><strong>냉장고 털기</strong><small>지금 있는 재료로 추천받기 →</small></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="section-heading">
+          <div><span class="section-kicker">MY RECIPES</span><h2>최근에 담은 레시피</h2></div>
+          <span class="count-pill" id="recipe-count">3개의 레시피</span>
+        </div>
+        <button class="text-button" id="migrate" hidden>이 브라우저의 예전 레시피를 SQLite로 가져오기</button>
+        <button class="text-button" id="reindex-all" hidden>저장된 레시피 검색 인덱스 복구</button>
+        <div class="recipe-grid" id="recipe-grid" aria-live="polite"></div>
+      </section>
+
+      <section class="view" id="import-view">
+        <div class="workspace-heading">
+          <p class="eyebrow">YOUTUBE TO RECIPE</p>
+          <h1>영상은 그대로,<br /><em>레시피는 한눈에.</em></h1>
+          <p>유튜브 주소를 붙여 넣으면 재료와 조리 순서를 한 페이지로 정리해드려요.</p>
+        </div>
+        <div class="url-card">
+          <form id="url-form">
+          <label for="youtube-url">유튜브 영상 주소</label>
+          <div class="url-row">
+            <span class="youtube-badge">▶</span>
+            <input id="youtube-url" type="url" placeholder="https://youtube.com/watch?v=..." required />
+            <button class="primary-button" type="submit">레시피 분석</button>
+          </div>
+          <p class="helper">YouTube 자막을 먼저 가져오고, 자막이 없으면 로컬 Whisper가 음성을 텍스트로 바꿔요. 처음 사용할 때 모델 다운로드가 필요할 수 있어요.</p>
+          </form>
+          <div class="manual-entry">
+            <div class="manual-entry-head"><strong>자막 또는 레시피 텍스트 직접 붙여넣기</strong><span>자동 추출이 막힐 때 사용하세요</span></div>
+            <form id="text-form">
+              <textarea id="source-text" rows="5" placeholder="유튜브 스크립트, 영상 설명란의 레시피, 메모를 붙여 넣으세요."></textarea>
+              <button class="text-button" type="submit">텍스트로 정리</button>
+            </form>
+          </div>
+        </div>
+        <div id="analysis-area" aria-live="polite"></div>
+      </section>
+
+      <section class="view" id="pantry-view">
+        <div class="workspace-heading compact">
+          <p class="eyebrow">WHAT'S IN MY FRIDGE?</p>
+          <h1>냉장고 속 재료로<br /><em>오늘 메뉴 찾기.</em></h1>
+          <p>보유한 재료를 입력하면 저장한 레시피 중 가장 잘 맞는 요리를 추천해드려요.</p>
+        </div>
+        <div class="pantry-layout">
+          <section class="pantry-panel">
+            <h2>보유 재료</h2>
+            <form id="ingredient-form" class="ingredient-form">
+              <input id="ingredient-input" placeholder="예: 달걀" autocomplete="off" />
+              <button type="submit" aria-label="재료 추가">추가</button>
+            </form>
+            <div class="quick-add" id="quick-add"></div>
+            <div class="ingredient-tags" id="ingredient-tags"></div>
+            <form id="search-form" class="search-filters">
+              <label>찾고 싶은 요리<input id="search-query" placeholder="매운 국물 요리" /></label>
+              <label>최대 조리 시간(분)<input id="max-time" type="number" min="1" /></label>
+              <label>최대 부족 재료 수<input id="max-missing" type="number" min="0" /></label>
+              <label>매운맛 추정 최솟값<select id="min-spice"><option value="">제한 없음</option><option value="2">매운 재료 포함(2 이상)</option><option value="3">청양고추 포함(3 이상)</option></select></label>
+              <label>제외할 재료<input id="exclude" placeholder="땅콩, 새우" /></label>
+              <label>알레르기(엄격 모드)<input id="allergens" placeholder="우유, 달걀" /></label>
+              <p class="helper">안전성 미검증 레시피는 엄격 모드에서 전부 제외됩니다. 제외 재료 검색만으로 알레르기 안전을 보장하지 않습니다.</p>
+              <label>보유 조리 도구<input id="tools" placeholder="프라이팬, 냄비 (빈칸: 제한 없음)" /></label>
+              <label><input id="tips" type="checkbox" /> 로컬 AI 대체 재료·조리 팁 생성</label>
+              <button class="primary-button" type="submit">조건으로 추천받기</button>
+            </form>
+          </section>
+          <section class="recommend-panel">
+            <div class="section-heading small"><div><span class="section-kicker">BEST MATCH</span><h2>만들 수 있는 요리</h2></div></div>
+            <div id="recommendations" class="recommend-list"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>
