@@ -13,7 +13,7 @@ colors:
   border: "#DECAB1"
 typography:
   h1:
-    fontFamily: "Georgia, Batang, serif"
+    fontFamily: "CookDiaryHandwriting, Malgun Gothic, sans-serif"
     fontSize: "clamp(2.25rem, 5vw, 4rem)"
     fontWeight: 400
   body-md:
@@ -21,8 +21,8 @@ typography:
     fontSize: "1rem"
     fontWeight: 400
   annotation:
-    fontFamily: "Segoe Print, cursive"
-    fontSize: "1rem"
+    fontFamily: "CookDiaryHandwriting, Malgun Gothic, sans-serif"
+    fontSize: "1.5rem"
     fontWeight: 400
   metadata:
     fontFamily: "Consolas, monospace"
@@ -88,8 +88,11 @@ not sufficient as the only way to identify an input or selected state.
 
 ## Typography
 
-- **Display / Hero:** An editorial serif, regular weight, comfortable spacing.
-  Use the system serif stack above; Korean headings must remain legible.
+- **Display / Hero:** The approved local Nanum MuGungHwa handwriting font,
+  regular weight, comfortable spacing. `assets/fonts/나눔손글씨 무궁화.ttf`
+  is served by the app and registered as `CookDiaryHandwriting` with `font-display: swap`.
+  Use it for the brand wordmark, hero, recipe titles, and short annotations.
+  Keep ingredient lists, cooking instructions, inputs, and metadata in their existing stacks.
 - **Body / UI:** A clean system sans-serif. Ingredients and instructions must
   remain easy to read while standing in a kitchen.
 - **Annotations:** A handwriting-like face for short decorative English labels

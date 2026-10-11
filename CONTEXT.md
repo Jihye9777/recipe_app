@@ -252,3 +252,9 @@ Git에서 확인한 관련 커밋:
 - 관련 파일: `index.html`, `styles.css`, `app.js`, `assets/cook-diary-rabbit.png`, `server.py`, `tests/test_http.py`, `README.md`, `AGENTS.md`, `docs/design/recipe-journal.md`, `.codex/agents/ui-designer.toml`. 기존 이미지와 브라우저 저장 키·DOM ID·API·불확실성/알레르기 안내·DB를 보존했다.
 - 검증: 새 로고 HTTP 테스트의 404 실패를 먼저 재현한 뒤 정적 허용 목록에 해당 PNG만 추가해 통과했다. Python 26개 테스트, JS 문법·전체 DOM 테스트, 관련 diff-check 통과. 실제 브라우저 360/768/1280px × 홈·담기·냉장고 9조합에서 가로 넘침 없음, 이미지 2곳 정상 로딩, 기존 레시피 9개 조회와 Enter 상세 열기 확인.
 - 승인 후 기존 8000번 서버만 재시작했고 홈페이지를 기본 뷰포트로 복구했다. 화면 증거는 `.runtime/design-preview/cook-diary-desktop.jpg`, `cook-diary-mobile.jpg`. 새 YouTube 영상/LLM 분석 정확도는 이번 시각 변경에서 검증하지 않았다. 정식 배포 시 SNS 이미지에는 공개 절대 URL 설정이 필요하다. 설치·DB 초기화·커밋·push는 하지 않았다.
+
+### 2026-10-11 — 나눔손글씨 무궁화 웹폰트 적용
+
+- 사용자가 추가한 `assets/fonts/나눔손글씨 무궁화.ttf`를 로컬 @font-face로 등록하고 제목·브랜드·레시피 제목·짧은 메모에 적용했다. 작은 실측 글자 크기를 보완했고 재료·조리 순서·본문·입력·메타데이터 글꼴은 유지했다. 폰트 파일을 이동·삭제하거나 외부 폰트 서비스를 연결하지 않았다.
+- 관련 파일: `styles.css`, `index.html`(CSS 캐시 버전), `server.py`(정확한 폰트 경로 허용 및 font/ttf), `tests/test_http.py`, `README.md`, `docs/design/recipe-journal.md`. 폰트 배포 시 저작권 안내·라이선스 전문 동봉 필요를 README에 안내했으며 라이선스 파일은 아직 제공되지 않았다.
+- 검증: 한글·공백 폰트 URL이 404인 실패를 먼저 확인한 뒤 HTTP 테스트 통과. Python 27개 및 DOM 테스트 통과, scoped diff-check 정상. 승인받아 현재 8000번 서버만 재시작했다. 브라우저 한글 font check true·loaded, 360/768/1280px × 3화면에서 가로 넘침 없음. 최종 캡처 `.runtime/design-preview/cook-diary-font-desktop.jpg`, `cook-diary-font-mobile.jpg`, 기본 뷰포트 복구. 설치·데이터 변경·커밋·push 없음.

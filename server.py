@@ -567,13 +567,14 @@ def frontend(path: str = ''):
     """허용한 UI 파일만 제공한다. 설정·소스·DB·임시 파일·기타 경로는 404다."""
     files = {'': 'index.html', 'index.html': 'index.html', 'app.js': 'app.js',
              'styles.css': 'styles.css', 'assets/og.png': 'assets/og.png',
-             'assets/cook-diary-rabbit.png': 'assets/cook-diary-rabbit.png'}
+             'assets/cook-diary-rabbit.png': 'assets/cook-diary-rabbit.png',
+             'assets/fonts/나눔손글씨 무궁화.ttf': 'assets/fonts/나눔손글씨 무궁화.ttf'}
     if path not in files:
         raise StarletteHTTPException(404, 'Not found')
     file = ROOT / files[path]
     if not file.is_file():
         raise StarletteHTTPException(404, 'Not found')
-    return FileResponse(file)
+    return FileResponse(file, media_type='font/ttf' if file.suffix == '.ttf' else None)
 
 
 if __name__ == '__main__':

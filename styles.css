@@ -1,4 +1,13 @@
+@font-face {
+  font-family: "CookDiaryHandwriting";
+  src: url("/assets/fonts/나눔손글씨 무궁화.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
+  --journal-font: "CookDiaryHandwriting", "Malgun Gothic", sans-serif;
   --paper: #FFF8E8;
   --paper-deep: #f3e8d3;
   --ink: #4B3027;
@@ -27,7 +36,7 @@ button { color: inherit; }
 .brand { justify-self: start; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0; border: 0; background: transparent; font-size: 19px; cursor: pointer; text-align: left; white-space: nowrap; }
 .brand-mark { display: block; flex: none; width: 52px; height: 52px; object-fit: contain; }
 .brand-wordmark { display: grid; gap: 4px; line-height: 1.2; }
-.brand-wordmark strong { font-weight: 700; letter-spacing: -.04em; }
+.brand-wordmark strong { font-family: var(--journal-font); font-size: 30px; font-weight: 400; letter-spacing: 0; }
 .brand-wordmark small { color: var(--orange); font-family: Consolas, monospace; font-size: 10px; letter-spacing: .12em; }
 nav { display: flex; gap: 4px; justify-content: center; }
 .nav-link { min-height: 44px; border: 0; border-bottom: 2px solid transparent; background: transparent; padding: 8px 12px; color: var(--muted); font-size: 14px; font-weight: 600; cursor: pointer; }
@@ -47,21 +56,21 @@ main { padding: 24px 0 64px; }
 @keyframes page-in { from { opacity: 0; } }
 .intro-row { display: grid; grid-template-columns: 1.3fr 1fr; align-items: center; gap: 24px; margin-bottom: 64px; }
 .eyebrow, .section-kicker { display: block; margin: 0 0 16px; color: var(--orange); font-family: Consolas, monospace; font-size: 11px; font-weight: 400; letter-spacing: .08em; }
-h1 { margin: 0; font-family: Georgia, Batang, "Malgun Gothic", serif; font-size: clamp(36px, 4.4vw, 60px); line-height: 1.35; letter-spacing: -.05em; font-weight: 400; }
+h1 { margin: 0; font-family: var(--journal-font); font-size: clamp(36px, 4.4vw, 60px); line-height: 1.35; letter-spacing: -.02em; font-weight: 400; }
 h1 em { color: var(--orange); font-style: normal; position: relative; }
 .subcopy, .workspace-heading > p:last-child { margin: 24px 0 0; color: var(--muted); font-size: 15px; line-height: 1.8; }
 .hero-action { margin-top: 24px; }
 .hero-action span { margin-left: 20px; }
 .hero-visual { position: relative; min-width: 0; }
 .ingredient-drawing { display: block; width: 100%; max-width: 340px; height: auto; margin: 0 auto 16px; object-fit: contain; pointer-events: none; }
-.handwritten { margin: 0 0 24px; color: var(--green); text-align: center; font-family: "Segoe Print", cursive, system-ui; font-size: 14px; transform: rotate(-3deg); }
+.handwritten { margin: 0 0 24px; color: var(--green); text-align: center; font-family: var(--journal-font); font-size: 24px; font-weight: 400; transform: rotate(-3deg); }
 .pantry-spotlight { width: 100%; border: 1px solid var(--field-edge); background: var(--paper); border-radius: 4px; padding: 16px; display: flex; align-items: center; gap: 12px; text-align: left; cursor: pointer; }
 .spotlight-icon { display: grid; place-items: center; width: 32px; height: 40px; color: var(--green); font-size: 28px; }
 .pantry-spotlight strong, .pantry-spotlight small { display: block; }
 .pantry-spotlight strong { margin-bottom: 5px; }
 .pantry-spotlight small { color: var(--muted); }
 .section-heading { display: flex; justify-content: space-between; align-items: end; margin-bottom: 22px; }
-.section-heading h2 { margin: 0; font-family: Georgia, Batang, serif; font-size: 26px; font-weight: 400; }
+.section-heading h2 { margin: 0; font-family: var(--journal-font); font-size: 32px; font-weight: 400; }
 .section-heading .section-kicker { margin-bottom: 8px; }
 .count-pill { color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 5px; font-size: 13px; }
 .recipe-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
@@ -70,11 +79,11 @@ h1 em { color: var(--orange); font-style: normal; position: relative; }
 .recipe-number { margin-bottom: 32px; color: var(--muted); font-family: Consolas, monospace; font-size: 11px; letter-spacing: .08em; }
 .recipe-meta { display: flex; gap: 8px; margin-bottom: 10px; }
 .recipe-meta span { padding: 4px 8px; border-radius: 4px; background: var(--paper-deep); color: var(--muted); font-size: 11px; }
-.recipe-card h3 { margin: 0 0 12px; font-family: Georgia, Batang, serif; font-size: 23px; font-weight: 400; line-height: 1.4; }
+.recipe-card h3 { margin: 0 0 12px; font-family: var(--journal-font); font-size: 28px; font-weight: 400; line-height: 1.4; }
 .recipe-card p { margin: 0 0 24px; color: var(--muted); font-size: 13px; }
 .card-open { display: flex; justify-content: space-between; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); color: var(--green); font-size: 12px; }
 .empty-state { grid-column: 1 / -1; padding: 32px; border: 1px dashed var(--field-edge); text-align: center; }
-.empty-state h3 { font-family: Georgia, Batang, serif; font-weight: 400; }
+.empty-state h3 { font-family: var(--journal-font); font-weight: 400; }
 .empty-state p { color: var(--muted); }
 .workspace-heading { max-width: 840px; margin: 0 auto 42px; text-align: center; }
 .workspace-heading h1 { font-size: clamp(36px, 4.4vw, 56px); }
@@ -101,7 +110,7 @@ h1 em { color: var(--orange); font-style: normal; position: relative; }
 .loader { width: 34px; height: 34px; margin: 0 auto 14px; border: 3px solid var(--paper-deep); border-top-color: var(--orange); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .result-top { display: flex; justify-content: space-between; gap: 24px; align-items: start; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
-.result-top h2 { margin: 8px 0; font-family: Georgia, Batang, serif; font-size: 30px; font-weight: 400; line-height: 1.4; }
+.result-top h2 { margin: 8px 0; font-family: var(--journal-font); font-size: 36px; font-weight: 400; line-height: 1.4; }
 .result-top p { margin: 0; color: var(--muted); }
 .save-button { flex: none; min-height: 44px; border: 1px solid var(--orange); border-radius: 4px; padding: 12px 20px; background: var(--orange); color: #fff; font-weight: 600; cursor: pointer; }
 .result-columns { display: grid; grid-template-columns: .8fr 1.2fr; gap: 30px; padding-top: 25px; }
@@ -111,7 +120,7 @@ h1 em { color: var(--orange); font-style: normal; position: relative; }
 .result-columns ol li::marker { color: var(--orange); font-family: Consolas, monospace; }
 .pantry-layout { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 24px; align-items: start; }
 .pantry-panel, .recommend-panel { min-width: 0; padding: 24px; border: 1px solid var(--line); background: #fffbf2; border-radius: 4px; box-shadow: var(--shadow); }
-.pantry-panel h2 { margin: 0 0 20px; font-family: Georgia, Batang, serif; font-weight: 400; }
+.pantry-panel h2 { margin: 0 0 20px; font-family: var(--journal-font); font-size: 32px; font-weight: 400; }
 .field-label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 600; }
 .ingredient-form { display: flex; gap: 8px; }
 .ingredient-form input { min-width: 0; flex: 1; border: 1px solid var(--field-edge); border-radius: 4px; background: var(--white); padding: 12px; }
@@ -169,6 +178,7 @@ summary { min-height: 44px; cursor: pointer; }
   .topbar { min-height: 80px; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
   .brand { font-size: 17px; padding: 0; }
   .brand-mark { width: 40px; height: 40px; }
+  .brand-wordmark strong { font-size: 28px; }
   .brand-wordmark small { font-size: 9px; }
   .top-actions { gap: 8px; }
   .llm-status { max-width: 80px; font-size: 10px; }

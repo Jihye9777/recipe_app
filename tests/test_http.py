@@ -82,6 +82,14 @@ class HTTPTests(unittest.TestCase):
         self.assertTrue(response.content.startswith(b'\x89PNG\r\n\x1a\n'))
         self.assertEqual(self.client.get('/assets/unapproved.png').status_code, 404)
 
+    def test_korean_font_url_serves_ttf_without_exposing_other_files(self):
+        """한글·공백 파일명의 웹폰트를 제공하며 다른 글꼴 경로는 공개하지 않는다."""
+        response = self.client.get('/assets/fonts/나눔손글씨 무궁화.ttf')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['content-type'], 'font/ttf')
+        self.assertTrue(response.content.startswith(b'\x00\x01\x00\x00'))
+        self.assertEqual(self.client.get('/assets/fonts/unapproved.ttf').status_code, 404)
+
     def test_openapi_describes_requests_and_job_responses(self):
         """문서에 분석·검색 입력과 202 작업 응답 스키마가 공개되는지 검증한다."""
         code, schema = self.request('/openapi.json')
