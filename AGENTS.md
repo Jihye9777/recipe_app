@@ -6,6 +6,8 @@ YouTube URL·텍스트를 개인 레시피로 저장하고 냉장고 재료로 �
 Python 3.11+ / `.venv-graph` / http.server / LangGraph / SQLite / Qdrant Local / Ollama.
 설치·API·파일 구조는 필요한 부분만 [README.md](README.md)에서 확인한다.
 
+디자인 위임을 명시적으로 요청하면 `.codex/agents/ui-designer.toml`의 `ui-designer`를 사용한다. 수정 파일을 지정하고 변경 이력 기록·최종 통합은 부모가 담당한다.
+
 ## Coding Principles
 
 Adapted from [Karpathy-inspired guidelines](https://github.com/multica-ai/andrej-karpathy-skills/blob/main/CLAUDE.md). Use judgment for trivial tasks; the permission rules below still apply.

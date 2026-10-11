@@ -200,3 +200,10 @@ Git에서 확인한 관련 커밋:
 - 요청·변경: 커뮤니티의 Karpathy-inspired CLAUDE.md를 참고해 Think Before Coding, Simplicity First, Surgical Changes, Goal-Driven Execution을 영어로 AGENTS.md에 추가했다. 중요한 가정·모호함, 최소 구현, 변경 범위, 관찰 가능한 검증 기준을 구체화하고 기존 중복 문장을 줄였다.
 - 적용: 사소한 선택은 자율 진행하며 삭제·설치·Git 작업에는 기존 승인 규칙을 적용한다. 원문 링크와 각색 사실을 명시했다.
 - 관련 파일: AGENTS.md, CONTEXT.md. 문서 diff·공백·append-only 보존을 검토하며 실행 코드 변경이 없어 앱 테스트는 재실행하지 않는다.
+
+### 2026-10-11 — 디자인 전담 Codex 커스텀 에이전트 구성
+
+- 요청·변경: 프로젝트 `.codex/agents/ui-designer.toml`에 name, description, developer_instructions를 정의했다. 공식 standalone custom agent 형식을 사용하고 지원 근거가 없는 instructions·tools.allow는 사용하지 않았다.
+- 범위: 기존 HTML/CSS/JS, 시각 계층·토큰 재사용·상태·반응형·접근성·UI 검증을 담당한다. 모델·도구·권한은 부모 설정을 상속하며 백엔드 변경·설치·Git 작업은 부모와 조율한다.
+- 위임: 명시적 디자인 위임 요청 때 사용할 역할을 AGENTS.md에 연결했다. 부모가 파일 범위를 지정하며 CONTEXT.md 기록과 통합은 부모만 수행한다.
+- 검증 범위: TOML 문법·필수 키와 문서 diff를 확인한다. 현재 대화에서 역할 자동 발견·실제 spawn은 확인하지 않았으며 새 세션에서 로딩 여부를 확인해야 한다.
