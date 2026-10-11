@@ -1,16 +1,16 @@
 :root {
-  --paper: #FAF7EF;
-  --paper-deep: #eee8db;
-  --ink: #382822;
-  --muted: #70665D;
-  --green: #596342;
+  --paper: #FFF8E8;
+  --paper-deep: #f3e8d3;
+  --ink: #4B3027;
+  --muted: #786153;
+  --green: #5B6448;
   --green-dark: #424b31;
-  --orange: #A33D32;
-  --line: #D8D0C2;
+  --orange: #A64B36;
+  --line: #decab1;
   --white: #FFFFFF;
-  --canvas: #DADCCB;
-  --field-edge: #8c8071;
-  --shadow: 0 4px 18px rgba(56, 40, 34, .08);
+  --canvas: #F0D3B6;
+  --field-edge: #92745f;
+  --shadow: 0 4px 18px rgba(75, 48, 39, .08);
 }
 
 * { box-sizing: border-box; }
@@ -20,12 +20,15 @@ button, input, textarea, select { font: inherit; }
 button { color: inherit; }
 .shell { position: relative; width: min(1120px, 100%); margin: 0 auto; padding: 0 48px 0 64px; border: 1px solid var(--line); background: var(--paper); box-shadow: var(--shadow), 5px 5px 0 -1px var(--paper-deep), 5px 5px 0 0 var(--line); }
 .shell::before { content: ""; position: absolute; inset: 0 auto 0 32px; width: 1px; background: var(--line); pointer-events: none; }
-.shell::after { content: ""; position: absolute; left: -13px; top: 200px; width: 44px; height: 12px; border: 3px solid #8c8071; border-radius: 50%; background: var(--canvas); box-shadow: 0 220px 0 -3px var(--canvas), 0 220px 0 0 #8c8071, 0 440px 0 -3px var(--canvas), 0 440px 0 0 #8c8071; pointer-events: none; }
+.shell::after { content: ""; position: absolute; left: -13px; top: 200px; width: 44px; height: 12px; border: 3px solid var(--field-edge); border-radius: 50%; background: var(--canvas); box-shadow: 0 220px 0 -3px var(--canvas), 0 220px 0 0 var(--field-edge), 0 440px 0 -3px var(--canvas), 0 440px 0 0 var(--field-edge); pointer-events: none; }
 .skip-link { position: fixed; left: 16px; top: 16px; z-index: 500; transform: translateY(-160%); padding: 12px 20px; background: var(--ink); color: white; }
 .skip-link:focus { transform: none; }
 .topbar { min-height: 96px; display: grid; grid-template-columns: auto 1fr auto; gap: 16px; align-items: center; border-bottom: 1px solid var(--line); }
-.brand { justify-self: start; display: flex; align-items: center; gap: 11px; min-height: 44px; border: 0; background: transparent; font-weight: 700; font-size: 19px; cursor: pointer; }
-.brand-mark { display: grid; place-items: center; width: 34px; height: 38px; border: 1px solid var(--orange); border-radius: 4px; color: var(--orange); font-family: Georgia, Batang, serif; transform: rotate(-5deg); }
+.brand { justify-self: start; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0; border: 0; background: transparent; font-size: 19px; cursor: pointer; text-align: left; white-space: nowrap; }
+.brand-mark { display: block; flex: none; width: 52px; height: 52px; object-fit: contain; }
+.brand-wordmark { display: grid; gap: 4px; line-height: 1.2; }
+.brand-wordmark strong { font-weight: 700; letter-spacing: -.04em; }
+.brand-wordmark small { color: var(--orange); font-family: Consolas, monospace; font-size: 10px; letter-spacing: .12em; }
 nav { display: flex; gap: 4px; justify-content: center; }
 .nav-link { min-height: 44px; border: 0; border-bottom: 2px solid transparent; background: transparent; padding: 8px 12px; color: var(--muted); font-size: 14px; font-weight: 600; cursor: pointer; }
 .nav-link.active { color: var(--ink); border-bottom-color: var(--orange); }
@@ -45,12 +48,12 @@ main { padding: 24px 0 64px; }
 .intro-row { display: grid; grid-template-columns: 1.3fr 1fr; align-items: center; gap: 24px; margin-bottom: 64px; }
 .eyebrow, .section-kicker { display: block; margin: 0 0 16px; color: var(--orange); font-family: Consolas, monospace; font-size: 11px; font-weight: 400; letter-spacing: .08em; }
 h1 { margin: 0; font-family: Georgia, Batang, "Malgun Gothic", serif; font-size: clamp(36px, 4.4vw, 60px); line-height: 1.35; letter-spacing: -.05em; font-weight: 400; }
-h1 em { color: var(--green); font-style: normal; position: relative; }
+h1 em { color: var(--orange); font-style: normal; position: relative; }
 .subcopy, .workspace-heading > p:last-child { margin: 24px 0 0; color: var(--muted); font-size: 15px; line-height: 1.8; }
 .hero-action { margin-top: 24px; }
 .hero-action span { margin-left: 20px; }
 .hero-visual { position: relative; min-width: 0; }
-.ingredient-drawing { display: block; width: 100%; max-width: 340px; margin: 0 auto; pointer-events: none; }
+.ingredient-drawing { display: block; width: 100%; max-width: 340px; height: auto; margin: 0 auto 16px; object-fit: contain; pointer-events: none; }
 .handwritten { margin: 0 0 24px; color: var(--green); text-align: center; font-family: "Segoe Print", cursive, system-ui; font-size: 14px; transform: rotate(-3deg); }
 .pantry-spotlight { width: 100%; border: 1px solid var(--field-edge); background: var(--paper); border-radius: 4px; padding: 16px; display: flex; align-items: center; gap: 12px; text-align: left; cursor: pointer; }
 .spotlight-icon { display: grid; place-items: center; width: 32px; height: 40px; color: var(--green); font-size: 28px; }
@@ -62,7 +65,7 @@ h1 em { color: var(--green); font-style: normal; position: relative; }
 .section-heading .section-kicker { margin-bottom: 8px; }
 .count-pill { color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 5px; font-size: 13px; }
 .recipe-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-.recipe-card { min-height: 280px; min-width: 0; border: 1px solid var(--line); border-top: 3px solid var(--green); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; background: #fdfbf5; box-shadow: var(--shadow); cursor: pointer; transition: transform .18s ease; overflow-wrap: anywhere; }
+.recipe-card { min-height: 280px; min-width: 0; border: 1px solid var(--line); border-top: 3px solid var(--orange); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; background: #fffbf2; box-shadow: var(--shadow); cursor: pointer; transition: transform .18s ease; overflow-wrap: anywhere; }
 .recipe-card:hover { transform: translateY(-1px); border-color: var(--green); }
 .recipe-number { margin-bottom: 32px; color: var(--muted); font-family: Consolas, monospace; font-size: 11px; letter-spacing: .08em; }
 .recipe-meta { display: flex; gap: 8px; margin-bottom: 10px; }
@@ -76,7 +79,7 @@ h1 em { color: var(--green); font-style: normal; position: relative; }
 .workspace-heading { max-width: 840px; margin: 0 auto 42px; text-align: center; }
 .workspace-heading h1 { font-size: clamp(36px, 4.4vw, 56px); }
 .workspace-heading.compact { margin-bottom: 48px; }
-.url-card { max-width: 940px; margin: 0 auto; padding: 32px; background: #fdfbf5; border: 1px solid var(--line); border-radius: 4px; box-shadow: var(--shadow); }
+.url-card { max-width: 940px; margin: 0 auto; padding: 32px; background: #fffbf2; border: 1px solid var(--line); border-radius: 4px; box-shadow: var(--shadow); }
 .url-card label { display: block; margin-bottom: 12px; font-weight: 700; font-size: 14px; }
 .url-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 8px 8px 8px 16px; border: 1px solid var(--field-edge); border-radius: 4px; background: var(--white); }
 .youtube-badge { color: var(--orange); }
@@ -93,7 +96,7 @@ h1 em { color: var(--green); font-style: normal; position: relative; }
 .manual-entry textarea { width: 100%; resize: vertical; min-height: 108px; border: 1px solid var(--field-edge); border-radius: 4px; padding: 12px; color: var(--ink); background: var(--white); line-height: 1.7; }
 .text-button { min-height: 44px; display: block; margin: 12px 0 0 auto; border: 1px solid var(--green); border-radius: 4px; padding: 10px 16px; color: var(--green); background: transparent; font-weight: 600; cursor: pointer; }
 #analysis-area { max-width: 940px; margin: 24px auto 0; }
-.analysis-loading, .analysis-result { padding: 32px; border: 1px solid var(--line); border-radius: 4px; background: #fdfbf5; overflow-wrap: anywhere; }
+.analysis-loading, .analysis-result { padding: 32px; border: 1px solid var(--line); border-radius: 4px; background: #fffbf2; overflow-wrap: anywhere; }
 .analysis-loading { text-align: center; color: var(--muted); }
 .loader { width: 34px; height: 34px; margin: 0 auto 14px; border: 3px solid var(--paper-deep); border-top-color: var(--orange); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -107,7 +110,7 @@ h1 em { color: var(--green); font-style: normal; position: relative; }
 .result-columns li { margin-bottom: 12px; }
 .result-columns ol li::marker { color: var(--orange); font-family: Consolas, monospace; }
 .pantry-layout { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 24px; align-items: start; }
-.pantry-panel, .recommend-panel { min-width: 0; padding: 24px; border: 1px solid var(--line); background: #fdfbf5; border-radius: 4px; box-shadow: var(--shadow); }
+.pantry-panel, .recommend-panel { min-width: 0; padding: 24px; border: 1px solid var(--line); background: #fffbf2; border-radius: 4px; box-shadow: var(--shadow); }
 .pantry-panel h2 { margin: 0 0 20px; font-family: Georgia, Batang, serif; font-weight: 400; }
 .field-label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 600; }
 .ingredient-form { display: flex; gap: 8px; }
@@ -163,10 +166,12 @@ summary { min-height: 44px; cursor: pointer; }
   body { padding: 12px 12px 100px; }
   .shell { width: 100%; padding: 0 20px; }
   .shell::before, .shell::after { display: none; }
-  .topbar { min-height: 80px; grid-template-columns: 1fr auto; gap: 8px; }
+  .topbar { min-height: 80px; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
   .brand { font-size: 17px; padding: 0; }
+  .brand-mark { width: 40px; height: 40px; }
+  .brand-wordmark small { font-size: 9px; }
   .top-actions { gap: 8px; }
-  .llm-status { max-width: 104px; font-size: 10px; }
+  .llm-status { max-width: 80px; font-size: 10px; }
   nav { position: fixed; z-index: 100; left: 12px; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); justify-content: space-around; padding: 8px 4px; border: 1px solid var(--field-edge); background: var(--paper); border-radius: 4px; box-shadow: var(--shadow); }
   .nav-link { padding: 8px; font-size: 12px; }
   main { padding: 20px 0 32px; }

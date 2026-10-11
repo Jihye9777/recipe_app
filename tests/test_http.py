@@ -74,6 +74,14 @@ class HTTPTests(unittest.TestCase):
         for path in ['/server.py','/data/recipe.db','/data/checkpoints.db','/.runtime/audio.mp4','/../server.py','/%73erver.py']:
             self.assertEqual(self.request(path)[0],404,path)
 
+    def test_approved_logo_is_public_but_other_assets_are_private(self):
+        """승인된 로고 PNG만 공개하며 임의의 asset 경로는 허용하지 않는다."""
+        response = self.client.get('/assets/cook-diary-rabbit.png')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['content-type'], 'image/png')
+        self.assertTrue(response.content.startswith(b'\x89PNG\r\n\x1a\n'))
+        self.assertEqual(self.client.get('/assets/unapproved.png').status_code, 404)
+
     def test_openapi_describes_requests_and_job_responses(self):
         """문서에 분석·검색 입력과 202 작업 응답 스키마가 공개되는지 검증한다."""
         code, schema = self.request('/openapi.json')

@@ -1,4 +1,4 @@
-"""한입노트의 로컬 HTTP API, 정적 파일 제공, YouTube 수집 진입점."""
+"""쿡다이어리의 로컬 HTTP API, 정적 파일 제공, YouTube 수집 진입점."""
 
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -304,7 +304,7 @@ ERROR_RESPONSES = {
     }.items()
 }
 app = FastAPI(
-    title='한입노트 API', version='1.0.0',
+    title='쿡다이어리 API', version='1.0.0',
     description='로컬 레시피 북 API. 분석은 202의 job_id로 상태를 조회합니다. '
                 'Try it out의 저장·분석·재색인 요청은 실제 데이터를 변경합니다.',
     lifespan=lifespan, responses=ERROR_RESPONSES,
@@ -566,7 +566,8 @@ def import_recipes(body: ImportInput):
 def frontend(path: str = ''):
     """허용한 UI 파일만 제공한다. 설정·소스·DB·임시 파일·기타 경로는 404다."""
     files = {'': 'index.html', 'index.html': 'index.html', 'app.js': 'app.js',
-             'styles.css': 'styles.css', 'assets/og.png': 'assets/og.png'}
+             'styles.css': 'styles.css', 'assets/og.png': 'assets/og.png',
+             'assets/cook-diary-rabbit.png': 'assets/cook-diary-rabbit.png'}
     if path not in files:
         raise StarletteHTTPException(404, 'Not found')
     file = ROOT / files[path]
@@ -581,6 +582,6 @@ if __name__ == '__main__':
     host = os.environ.get('APP_HOST', '127.0.0.1')
     port = int(os.environ.get('APP_PORT', '8000'))
     display_host = 'localhost' if host in {'127.0.0.1', 'localhost'} else host
-    print(f'한입노트가 http://{display_host}:{port} 에서 실행됩니다.', flush=True)
+    print(f'쿡다이어리가 http://{display_host}:{port} 에서 실행됩니다.', flush=True)
     print(f'API 문서: http://{display_host}:{port}/docs', flush=True)
     uvicorn.run(app, host=host, port=port, workers=1)

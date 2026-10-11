@@ -28,7 +28,7 @@ function showView(name) {
 async function refreshRecipes() { recipes=(await api('/api/recipes')).recipes; renderRecipes(); }
 function renderRecipes() {
   qs('#recipe-count').textContent=`${recipes.length}개의 레시피 · SQLite`;
-  qs('#recipe-grid').innerHTML=recipes.map((r,i)=>`<article class="recipe-card" data-index="${i}" tabindex="0" role="button"><span class="recipe-number">RECIPE / ${String(i+1).padStart(2,'0')}</span><div class="recipe-meta"><span>${esc(r.category)}</span><span>${r.time ? esc(r.time)+'분':'시간 미상'}</span></div><h3>${esc(r.title)}</h3><p>${esc(r.ingredients.slice(0,4).join(' · '))}</p><span class="card-open">레시피 펼쳐보기 <span aria-hidden="true">↗</span></span></article>`).join('') || '<div class="empty-state"><span class="section-kicker">YOUR FIRST PAGE</span><h3>아직 비어 있는 레시피 북</h3><p>영상이나 텍스트에서 찾은 첫 레시피를 담아보세요.</p><button class="primary-button" id="empty-import">첫 레시피 담기</button></div>';
+  qs('#recipe-grid').innerHTML=recipes.map((r,i)=>`<article class="recipe-card" data-index="${i}" tabindex="0" role="button"><span class="recipe-number">DIARY / ${String(i+1).padStart(2,'0')}</span><div class="recipe-meta"><span>${esc(r.category)}</span><span>${r.time ? esc(r.time)+'분':'시간 미상'}</span></div><h3>${esc(r.title)}</h3><p>${esc(r.ingredients.slice(0,4).join(' · '))}</p><span class="card-open">요리 일기 펼쳐보기 <span aria-hidden="true">↗</span></span></article>`).join('') || '<div class="empty-state"><span class="section-kicker">YOUR FIRST PAGE</span><h3>첫 요리 일기를 기다리고 있어요</h3><p>다시 만들고 싶은 레시피로 첫 페이지를 채워보세요.</p><button class="primary-button" id="empty-import">첫 레시피 담기</button></div>';
   if(qs('#empty-import')) qs('#empty-import').onclick=()=>showView('import');
   qsa('#recipe-grid [data-index]').forEach(el=>{
     const open=()=>showSavedRecipe(recipes[Number(el.dataset.index)]);
@@ -37,7 +37,7 @@ function renderRecipes() {
 }
 function showSavedRecipe(r) {
   showView('import');
-  qs('#analysis-area').innerHTML=`<article class="analysis-result"><div class="result-top"><div><span class="section-kicker">SQLite에 저장됨 · 검색 인덱스: ${esc(r.index_status)}</span><h2>${esc(r.title)}</h2><p>${esc(r.category)} · ${r.time ? esc(r.time)+'분':'시간 미상'}</p></div><button class="save-button" id="back-to-recipes">레시피 목록</button></div><div class="result-columns"><div><h3>준비할 재료</h3><ul>${r.ingredients.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div><div><h3>조리 순서</h3><ol>${r.steps.map(x=>`<li>${esc(x)}</li>`).join('')}</ol></div></div><p class="helper">매운맛: ${r.semantic.spice_level ?? '알 수 없음'} (재료 기반 추정) · 알레르기 안전성은 검증되지 않았습니다.</p><button class="text-button" id="reindex">검색 인덱스 다시 만들기</button><p id="index-message" role="status"></p></article>`;
+  qs('#analysis-area').innerHTML=`<article class="analysis-result"><div class="result-top"><div><span class="section-kicker">SQLite에 저장됨 · 검색 인덱스: ${esc(r.index_status)}</span><h2>${esc(r.title)}</h2><p>${esc(r.category)} · ${r.time ? esc(r.time)+'분':'시간 미상'}</p></div><button class="save-button" id="back-to-recipes">내 요리 일기로</button></div><div class="result-columns"><div><h3>준비할 재료</h3><ul>${r.ingredients.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div><div><h3>조리 순서</h3><ol>${r.steps.map(x=>`<li>${esc(x)}</li>`).join('')}</ol></div></div><p class="helper">매운맛: ${r.semantic.spice_level ?? '알 수 없음'} (재료 기반 추정) · 알레르기 안전성은 검증되지 않았습니다.</p><button class="text-button" id="reindex">검색 인덱스 다시 만들기</button><p id="index-message" role="status"></p></article>`;
   qs('#back-to-recipes').onclick=()=>showView('home');
   qs('#reindex').onclick=async e=>{
     e.target.disabled=true;

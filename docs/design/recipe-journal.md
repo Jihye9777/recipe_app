@@ -1,16 +1,16 @@
 ---
 version: "alpha"
-name: "Handmade Recipe Journal"
-description: "An editorial recipe notebook: warm paper, quiet binder details, handwritten annotations, and watercolor food illustrations. Personal, tactile, readable, and made for everyday cooking."
+name: "Cook Diary — Cozy Kitchen Journal"
+description: "A cozy cooking diary: butter-cream paper, cocoa ink, apricot warmth, terracotta accents, and a slim rabbit chef stirring tomato soup. Personal, readable, and made for everyday cooking."
 colors:
-  primary: "#FAF7EF"
-  secondary: "#382822"
-  tertiary: "#A33D32"
-  neutral: "#DADCCB"
+  primary: "#FFF8E8"
+  secondary: "#4B3027"
+  tertiary: "#A64B36"
+  neutral: "#F0D3B6"
   surface: "#FFFFFF"
-  accent: "#596342"
-  muted: "#70665D"
-  border: "#D8D0C2"
+  accent: "#5B6448"
+  muted: "#786153"
+  border: "#DECAB1"
 typography:
   h1:
     fontFamily: "Georgia, Batang, serif"
@@ -43,9 +43,13 @@ components:
 ## Overview
 
 A personal cookbook assembled over time, not a polished SaaS dashboard.
+The brand is **쿡다이어리 / COOK DIARY**. Its home promise is
+“오늘의 한 끼를, 한 페이지에.” Navigation uses “내 요리 일기”,
+“레시피 담기”, and “내 냉장고”. This is a visual journal metaphor, not
+a new diary-entry data model. Existing recipe and pantry behavior stays intact.
 Combine the quiet spacing of an editorial binder with the warmth of a kitchen
-scrapbook: cream pages, dark ink, a tomato-red accent, olive pencil marks, and
-small watercolor ingredients. The interface should feel collected and lived-in
+scrapbook: butter-cream pages, cocoa ink, terracotta accents, olive pencil marks,
+and an approved rabbit-chef illustration. The interface should feel collected and lived-in
 without making cooking instructions harder to scan.
 
 The supplied references inform the visual language, not a layout to copy:
@@ -67,14 +71,14 @@ Do not turn every screen into a dense illustrated collage.
 
 ## Colors
 
-- **Paper** (#FAF7EF) — Main page and recipe sheets.
-- **Warm Ink** (#382822) — Titles, ingredients, and body copy.
-- **Tomato Red** (#A33D32) — Primary actions and a few editorial accents.
-- **Sage Backdrop** (#DADCCB) — The quiet surface behind the notebook.
+- **Butter-Cream Paper** (#FFF8E8) — Main page and recipe sheets.
+- **Cocoa Ink** (#4B3027) — Titles, ingredients, and body copy.
+- **Terracotta** (#A64B36) — Primary actions and a few editorial accents.
+- **Apricot Backdrop** (#F0D3B6) — The warm surface behind the notebook.
 - **White** (#FFFFFF) — Input surfaces and text on dark action fills.
-- **Olive Ink** (#596342) — Secondary actions, selected filters, and note markers.
-- **Muted Ink** (#70665D) — Dates, provenance, and secondary labels.
-- **Paper Edge** (#D8D0C2) — Rules, sheet edges, and separators.
+- **Olive Ink** (#5B6448) — Secondary actions, selected filters, and note markers.
+- **Muted Ink** (#786153) — Dates, provenance, and secondary labels.
+- **Paper Edge** (#DECAB1) — Rules, sheet edges, and separators.
 
 These are semantic roles, not an instruction to fill equal areas with each color.
 Paper and ink dominate; tomato and olive are used sparingly. Keep watercolor
@@ -106,7 +110,7 @@ without explicit approval. Do not use forced all-caps spacing on Korean copy.
 
 ## Layout
 
-- **Canvas:** Sage backdrop with one central paper sheet; max width 1120px.
+- **Canvas:** Apricot backdrop with one central butter-cream paper sheet; max width 1120px.
 - **Spacing rhythm:** 8px base with 4px increments for compact details.
 - **Page margins:** clamp(16px, 4vw, 48px); section gaps 32–64px.
 - **Hero:** Small journal label, expressive title, short purpose statement, and
@@ -147,7 +151,7 @@ Small recipe tags may use the 12px radius; do not make every element a sticker.
 
 ## Components
 
-- **Primary Button:** Tomato-red fill, white text, 4px radius, minimum 44px
+- **Primary Button:** Terracotta fill, white text, 4px radius, minimum 44px
   touch target. One clear primary action per local task.
 - **Secondary Button:** Olive or warm-ink outline on paper. Label describes the
   action; do not rely on an unexplained hand-drawn icon.
@@ -172,6 +176,13 @@ Small recipe tags may use the 12px radius; do not make every element a sticker.
   failures, missing source evidence, or uncertain ingredients as decorative notes.
 
 ## Illustration & Photography
+
+The approved brand asset is `assets/cook-diary-rabbit.png`: a slim rabbit chef
+stirring tomato soup, flat cream and terracotta fills, clean thick cocoa outlines,
+and a transparent background. Use it in the header and as the home illustration.
+Keep its proportions with `object-fit: contain`; do not stretch, redraw, or replace
+it without a new request. Header repetitions are decorative when the adjacent
+wordmark already names the brand. The original illustration asset stays preserved.
 
 Choose watercolor vegetables, colored-pencil kitchen tools, or loose ink
 drawings with imperfect edges and visible pigment variation. A tomato, herb
@@ -205,7 +216,7 @@ sprig, whisk, or pot is enough to establish the visual language.
 
 ## Use Case
 
-Hanip Note: collecting YouTube recipes, reviewing extracted ingredients,
-keeping a personal recipe book, and planning meals from pantry ingredients.
+Cook Diary (쿡다이어리): collecting YouTube recipes, reviewing extracted ingredients,
+keeping a personal cooking journal, and planning meals from pantry ingredients.
 This file guides requested UI work; it does not apply a stylesheet or change
 the live website merely by existing.

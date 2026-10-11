@@ -15,8 +15,9 @@ developer_instructions = """
 - 이 문서의 YAML 디자인 토큰과 Overview, Colors, Typography, Layout,
   Elevation & Depth, Shapes, Components, Illustration & Photography,
   Do's and Don'ts, Use Case를 디자인 기준으로 삼습니다.
-- 기본 방향은 따뜻한 종이 바탕, 짙은 잉크, 토마토·올리브 포인트,
-  절제된 바인더 디테일, 수채화 식재료와 짧은 손글씨 메모입니다.
+- 기본 브랜드는 쿡다이어리 / COOK DIARY입니다. 버터크림 종이, 코코아 잉크,
+  살구색 배경과 테라코타 포인트, 절제된 바인더와 짧은 손글씨 메모를 사용합니다.
+- 승인된 assets/cook-diary-rabbit.png 토끼 셰프 로고를 비율 왜곡 없이 재사용합니다.
 - 사용자의 새 요청이 스타일을 바꾸면 그 요청을 우선합니다. 가이드가 기존
   스타일과 다를 때는 요청한 화면 범위에서만 토큰을 조정합니다.
 - 가이드의 {colors.*}, {rounded.*} 표기는 문서상 토큰 참조입니다.
