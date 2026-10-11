@@ -3,41 +3,41 @@
 import json
 import os
 import tempfile
-import threading
 import time
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-from urllib.request import Request, build_opener, ProxyHandler
-from urllib.error import HTTPError
-from http.server import ThreadingHTTPServer
+from fastapi.testclient import TestClient
 from test_workflows import FakeLLM, FakeIndex, TEXT, RECIPE
 from storage import Store
 from workflows import Pipelines
 
 class HTTPTests(unittest.TestCase):
-    """임시 DB와 외부 연동 대역을 사용하는 실제 HTTP 라우팅 테스트."""
+    """임시 DB와 외부 연동 대역을 사용하는 FastAPI HTTP 경계 테스트."""
 
     @classmethod
     def setUpClass(cls):
-        """임시 Store, 가짜 AI·인덱스와 임의 포트 테스트 서버를 시작한다."""
+        """임시 Store·가짜 연동으로 ASGI 수명을 시작한다. 사용자 DB는 사용하지 않는다."""
         cls.temp=tempfile.TemporaryDirectory(); cls.root=Path(cls.temp.name)
-        os.environ['RECIPE_DATA_DIR']=str(cls.root)
+        cls.old_tempdir = tempfile.tempdir
+        cls.environment = patch.dict(os.environ, {
+            'RECIPE_DATA_DIR': str(cls.root), 'RECIPE_RUNTIME_DIR': str(cls.root),
+        })
+        cls.environment.start()
         import server
         cls.server=server
         cls.llm=FakeLLM(); cls.index=FakeIndex()
         server.STORE=Store(cls.root/'recipe.db')
         server.PIPELINES=Pipelines(server.STORE,cls.llm,cls.index,lambda url:(TEXT,'ko','fake'),str(cls.root/'checkpoints.db'))
-        cls.httpd=ThreadingHTTPServer(('127.0.0.1',0),server.RecipeHandler)
-        cls.thread=threading.Thread(target=cls.httpd.serve_forever,daemon=True); cls.thread.start()
-        cls.base='http://127.0.0.1:'+str(cls.httpd.server_port)
-        cls.client=build_opener(ProxyHandler({}))
+        cls.client = TestClient(server.app, raise_server_exceptions=False)
+        cls.client.__enter__()
     @classmethod
     def tearDownClass(cls):
-        """HTTP 서버·작업자·체크포인트 연결과 임시 폴더를 정리한다."""
-        cls.httpd.shutdown();cls.httpd.server_close();cls.thread.join()
-        cls.server.WORKER.shutdown(wait=True);cls.server.PIPELINES.checkpoint_db.close()
-        cls.temp.cleanup();os.environ.pop('RECIPE_DATA_DIR',None)
+        """lifespan에서 연결을 닫고 이 테스트가 만든 임시 폴더만 자동 삭제한다."""
+        cls.client.__exit__(None, None, None)
+        tempfile.tempdir = cls.old_tempdir
+        cls.environment.stop()
+        cls.temp.cleanup()
     def request(self,path,body=None):
         """테스트 서버에 GET 또는 JSON POST 요청을 보내 상태와 본문을 반환한다.
 
@@ -49,12 +49,8 @@ class HTTPTests(unittest.TestCase):
             성공 시 ``(HTTP 상태, 역직렬화 JSON)``. HTTP 오류 응답이면
             ``(오류 상태, 원문 문자열)`` 튜플.
         """
-        req=Request(self.base+path,data=json.dumps(body).encode() if body is not None else None,headers={'Content-Type':'application/json'})
-        try:
-            with self.client.open(req,timeout=10) as response:
-                return response.status,json.loads(response.read())
-        except HTTPError as error:
-            return error.code,error.read().decode()
+        response = self.client.get(path) if body is None else self.client.post(path, json=body)
+        return response.status_code, response.json() if response.is_success else response.text
     def job(self,id):
         """작업이 종료 상태에 도달할 때까지 조회하고 최종 작업 사전을 반환한다."""
         for _ in range(100):
@@ -77,6 +73,50 @@ class HTTPTests(unittest.TestCase):
         """소스·DB·체크포인트·임시 파일 경로가 모두 404인지 검증한다."""
         for path in ['/server.py','/data/recipe.db','/data/checkpoints.db','/.runtime/audio.mp4','/../server.py','/%73erver.py']:
             self.assertEqual(self.request(path)[0],404,path)
+
+    def test_openapi_describes_requests_and_job_responses(self):
+        """문서에 분석·검색 입력과 202 작업 응답 스키마가 공개되는지 검증한다."""
+        code, schema = self.request('/openapi.json')
+        self.assertEqual(code, 200)
+        paths = schema['paths']
+        for path in ['/api/analyze', '/api/search', '/api/review', '/api/retry',
+                     '/api/pantry', '/api/reindex', '/api/reindex-all', '/api/import']:
+            self.assertIn('requestBody', paths[path]['post'], path)
+        analyze = paths['/api/analyze']['post']
+        self.assertIn('202', analyze['responses'])
+        self.assertIn('schema', analyze['responses']['202']['content']['application/json'])
+        search = schema['components']['schemas']['SearchInput']
+        self.assertIn('pantry', search['properties'])
+        self.assertIn('max_missing', search['properties'])
+
+    def test_docs_and_existing_frontend_are_available(self):
+        """Swagger UI와 기존 홈페이지가 함께 제공되는지 검증한다."""
+        for path, marker in [('/docs', 'swagger-ui'), ('/redoc', 'redoc'), ('/', '<html')]:
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(marker, response.text.lower())
+
+    def test_body_contract_rejects_invalid_requests_as_json(self):
+        """JSON 객체·크기·Content-Type 계약과 누락 필드를 검증한다."""
+        for content in ['[]', '{', '', '{"text":"' + 'x' * 2_000_000 + '"}']:
+            response = self.client.post('/api/analyze', content=content,
+                                        headers={'Content-Type': 'application/json'})
+            self.assertEqual(response.status_code, 422)
+            self.assertIn('error', response.json())
+        response = self.client.post('/api/analyze', content='text')
+        self.assertEqual(response.status_code, 415)
+        self.assertIn('error', response.json())
+        for path in ['/api/retry', '/api/review', '/api/reindex']:
+            response = self.client.post(path, json={})
+            self.assertEqual(response.status_code, 422)
+            self.assertIn('error', response.json())
+
+    def test_unexpected_failure_returns_json(self):
+        """예상치 못한 저장소 오류도 빈 응답 대신 500 오류 JSON인지 검증한다."""
+        with patch.object(self.server.STORE, 'all', side_effect=Exception('test failure')):
+            response = self.client.get('/api/recipes')
+        self.assertEqual(response.status_code, 500)
+        self.assertIn('error', response.json())
     def test_errors_are_json(self):
         """잘못된 검색과 없는 작업이 구조화된 오류를 반환하는지 검증한다."""
         code,out=self.request('/api/search',{'max_missing':-1})
@@ -116,5 +156,64 @@ class HTTPTests(unittest.TestCase):
         with patch.object(self.server,'transcript_from_youtube_transcript_api',side_effect=RuntimeError('no captions')), patch.object(self.server,'transcript_from_local_whisper',return_value=(TEXT,'ko','whisper')) as whisper:
             result=self.server.extract_transcript('https://youtu.be/UUOpe_sTKzA')
             self.assertEqual(result[0],TEXT);whisper.assert_called_once()
+
+class LifespanTests(unittest.TestCase):
+    """서버 재시작 시 실제 Qdrant 파일 잠금과 체크포인트 종료를 검증한다."""
+
+    def test_shutdown_releases_qdrant_and_allows_restart(self):
+        """같은 인덱스 경로로 앱을 두 번 시작할 수 있어야 한다."""
+        import sqlite3
+        import server
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(server, 'DATA_DIR', root), patch.object(server, 'RUNTIME_DIR', root), \
+                 patch.object(server, 'Ollama', FakeLLM), \
+                 patch.dict(os.environ, {'QDRANT_PATH': str(root / 'qdrant')}):
+                for _ in range(2):
+                    with TestClient(server.app) as client:
+                        self.assertEqual(client.get('/docs').status_code, 200)
+                        graph = server.pipelines()
+                        self.assertTrue(graph.index.health()['ready'])
+                    with self.assertRaises(sqlite3.ProgrammingError):
+                        graph.checkpoint_db.execute('SELECT 1')
+                    self.assertIsNone(server.WORKER)
+                    self.assertIsNone(server.PIPELINES)
+
+    def test_uvicorn_serves_docs_over_real_http(self):
+        """임시 포트의 실제 Uvicorn에서 웹 화면·문서·API 명세를 검증한다."""
+        import socket
+        import threading
+        import uvicorn
+        from urllib.request import build_opener, ProxyHandler
+        import server
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(server, 'DATA_DIR', root), patch.object(server, 'RUNTIME_DIR', root):
+                listener = socket.socket()
+                listener.bind(('127.0.0.1', 0))
+                base = 'http://127.0.0.1:' + str(listener.getsockname()[1])
+                runner = uvicorn.Server(uvicorn.Config(server.app, log_level='error'))
+                thread = threading.Thread(target=runner.run, kwargs={'sockets': [listener]}, daemon=True)
+                thread.start()
+                try:
+                    deadline = time.monotonic() + 10
+                    while not runner.started and thread.is_alive() and time.monotonic() < deadline:
+                        time.sleep(0.02)
+                    self.assertTrue(runner.started, 'Uvicorn startup failed')
+                    client = build_opener(ProxyHandler({}))
+                    for path, marker in [('/', '<html'), ('/docs', 'swagger-ui')]:
+                        with client.open(base + path, timeout=5) as response:
+                            self.assertEqual(response.status, 200)
+                            self.assertIn(marker, response.read().decode().lower())
+                    with client.open(base + '/openapi.json', timeout=5) as response:
+                        self.assertIn('/api/analyze', json.loads(response.read())['paths'])
+                finally:
+                    runner.should_exit = True
+                    thread.join(timeout=10)
+                    listener.close()
+                self.assertFalse(thread.is_alive(), 'Uvicorn shutdown failed')
+
 
 if __name__=='__main__':unittest.main()

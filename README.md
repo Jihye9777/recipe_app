@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # 한입노트 — 로컬 레시피 북
 
 YouTube URL 또는 직접 붙여 넣은 텍스트를 레시피로 정리하고, 냉장고 재료로 검색·추천하는 개인용 로컬 웹 앱입니다.
@@ -7,6 +6,7 @@ YouTube URL 또는 직접 붙여 넣은 텍스트를 레시피로 정리하고, 
 - **Qdrant Local**: 원본에서 다시 만들 수 있는 벡터 검색 인덱스
 - **시맨틱 레이어**: 근거와 버전을 가진 파생 정보
 - **LangGraph**: 정해진 노드와 조건 분기로 두 파이프라인 실행
+- **FastAPI + Uvicorn**: 웹 화면·JSON API 제공 및 Swagger UI 자동 문서
 
 Qdrant는 Python 프로세스 안에서 Local mode로 실행하므로 **Docker, 별도 Qdrant 서버, BIOS 가상화가 필요하지 않습니다.**
 
@@ -58,6 +58,22 @@ EMBEDDING_MODEL=embeddinggemma
 ```
 
 또는 `start_graph.bat`을 더블클릭하고 [http://localhost:8000](http://localhost:8000)을 엽니다. Qdrant는 `data/qdrant/`에서 앱과 함께 실행되므로 별도 포트나 실행 명령이 없습니다.
+
+기존 명령은 그대로 사용합니다. `server.py`가 FastAPI 앱을 Uvicorn으로 실행하며
+`APP_HOST`, `APP_PORT` 설정을 적용합니다. 이전 서버가 실행 중이면 그 터미널에서
+Ctrl+C로 종료한 뒤 새 코드로 다시 실행하세요. Qdrant Local은 파일 잠금을 사용하므로
+단일 프로세스(worker 1)로 실행하고 reload·여러 서버의 중복 실행은 피합니다.
+
+서버가 실행되면 [API 문서 /docs](http://localhost:8000/docs)에서 API를 분류별로
+펼쳐 입력 필드·응답 형식을 확인하고 **Try it out → Execute**로 호출할 수 있습니다.
+[ReDoc /redoc](http://localhost:8000/redoc)은 읽기용 문서,
+[OpenAPI /openapi.json](http://localhost:8000/openapi.json)은 JSON 명세입니다.
+Swagger/ReDoc의 기본 UI 파일은 CDN에서 받으므로 문서 화면에는 인터넷 연결이 필요합니다.
+
+`POST /api/analyze`에 URL 또는 text를 보내면 `202`와 `job_id`가 반환됩니다.
+`GET /api/jobs/{job_id}`에서 `queued/running/review/complete/failed` 상태와 결과를 확인하세요.
+문서 화면의 분석·냉장고 저장·이관·재색인 호출은 실제 작업과 DB 변경을 수행합니다.
+입력 오류도 기존 화면이 처리하는 `error` 필드의 JSON을 반환합니다.
 
 ## 3. 파이프라인 1 — 수집·저장
 
@@ -147,6 +163,7 @@ QDRANT_COLLECTION=RecipeV2
 
 | 경로 | 용도 |
 | --- | --- |
+| `GET /docs`, `GET /redoc`, `GET /openapi.json` | API 문서·OpenAPI 명세 |
 | `GET /api/recipes` | 레시피 목록·상세 |
 | `GET/POST /api/pantry` | 냉장고 읽기·저장 |
 | `POST /api/analyze` | URL 또는 텍스트 분석 시작 |
@@ -156,8 +173,14 @@ QDRANT_COLLECTION=RecipeV2
 | `POST /api/reindex` | 한 건 재색인 |
 | `POST /api/reindex-all` | 필요한 모든 레시피 재색인 |
 | `GET /api/health` | SQLite·Ollama·임베딩·Qdrant 상태 |
+| `GET /api/status` | Ollama 실행·모델 설치 상태 |
+| `POST /api/import` | 과거 브라우저 레시피 이관 |
 
-`server.py`는 HTTP와 수집, `workflows.py`는 LangGraph, `domain.py`는 스키마·시맨틱 규칙, `storage.py`는 SQLite, `integrations.py`는 Ollama·Qdrant 연동을 담당합니다.
+`server.py`는 FastAPI 라우트·서버 수명과 수집, `api_schemas.py`는 API 요청·응답 스키마,
+`workflows.py`는 LangGraph, `domain.py`는 도메인 스키마·시맨틱 규칙,
+`storage.py`는 SQLite, `integrations.py`는 Ollama·Qdrant 연동을 담당합니다.
+HTTP 테스트는 FastAPI TestClient와 임시 SQLite·가짜 AI 연동을 사용하고,
+수명 테스트는 임시 Qdrant Local의 파일 잠금 해제·동일 경로 재시작을 확인합니다.
 
 ## 8. 검증과 백업
 
@@ -178,6 +201,5 @@ QDRANT_COLLECTION=RecipeV2
 - [LangGraph 워크플로와 에이전트](https://docs.langchain.com/oss/python/langgraph/workflows-agents)
 - [LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
 - [Ollama 임베딩 API](https://docs.ollama.com/api/embed)
-=======
-# recipe_app
->>>>>>> origin/main
+- [FastAPI 자동 API 문서](https://fastapi.tiangolo.com/tutorial/first-steps/)
+- [FastAPI 서버 수명 관리](https://fastapi.tiangolo.com/advanced/events/)

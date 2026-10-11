@@ -3,7 +3,7 @@
 ## 프로젝트
 
 YouTube URL·텍스트를 개인 레시피로 저장하고 냉장고 재료로 추천하는 로컬 웹 앱.
-Python 3.11+ / `.venv-graph` / http.server / LangGraph / SQLite / Qdrant Local / Ollama.
+Python 3.11+ / `.venv-graph` / FastAPI·Uvicorn / LangGraph / SQLite / Qdrant Local / Ollama.
 설치·API·파일 구조는 필요한 부분만 [README.md](README.md)에서 확인한다.
 
 디자인 위임을 명시적으로 요청하면 `.codex/agents/ui-designer.toml`의 `ui-designer`를 사용한다. 수정 파일을 지정하고 변경 이력 기록·최종 통합은 부모가 담당한다.
@@ -63,6 +63,8 @@ Adapted from [Karpathy-inspired guidelines](https://github.com/multica-ai/andrej
 ```
 
 문서 변경은 링크·명령·diff만 확인한다. 테스트는 격리된 임시 저장소를 사용하며 자동 삭제 범위도 아래 승인 규칙을 따른다.
+
+API 문서는 `/docs`, 명세는 `/openapi.json`이다. Qdrant Local 파일 잠금을 공유하므로 Uvicorn은 단일 worker로 실행하고 reload·중복 서버를 기본 사용하지 않는다.
 
 ## 권한·금지 구역
 

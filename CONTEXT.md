@@ -207,3 +207,12 @@ Git에서 확인한 관련 커밋:
 - 범위: 기존 HTML/CSS/JS, 시각 계층·토큰 재사용·상태·반응형·접근성·UI 검증을 담당한다. 모델·도구·권한은 부모 설정을 상속하며 백엔드 변경·설치·Git 작업은 부모와 조율한다.
 - 위임: 명시적 디자인 위임 요청 때 사용할 역할을 AGENTS.md에 연결했다. 부모가 파일 범위를 지정하며 CONTEXT.md 기록과 통합은 부모만 수행한다.
 - 검증 범위: TOML 문법·필수 키와 문서 diff를 확인한다. 현재 대화에서 역할 자동 발견·실제 spawn은 확인하지 않았으며 새 세션에서 로딩 여부를 확인해야 한다.
+
+### 2026-10-11 — HTTP 서버를 FastAPI로 전환
+
+- 요청·변경: 기존 API 주소·JSON 필드와 비동기 job_id 흐름을 유지하며 server.py의 http.server 처리를 FastAPI·Uvicorn으로 전환했다. api_schemas.py에 요청·응답 형식을 정의하고 /docs, /redoc, /openapi.json을 제공한다. 기존 실행 명령·배치 파일은 유지한다.
+- 자원·입력: lifespan에서 SQLite와 단일 작업자를 준비하고 종료 시 진행 작업·체크포인트·Qdrant를 정리한다. 파이프라인 초기화 잠금을 추가했다. 정적 파일 허용 목록, 2MB JSON 객체 제한, error 필드 오류 계약을 유지한다.
+- 의존성·문서: 승인 후 .venv-graph에 FastAPI 0.143.0, Uvicorn 0.54.0 및 의존성을 설치했다. requirements·lock·README·AGENTS.md를 갱신하고 README의 기존 병합 충돌 표식을 정리했다. Swagger/ReDoc 기본 UI는 CDN 연결이 필요하다.
+- 검증: 전환 전 19개 테스트 통과, 신규 문서 테스트 2개의 404 실패를 확인한 뒤 구현했다. 최종 25개 테스트와 pip check 통과. 임시 포트의 실제 Uvicorn에서 홈페이지·Swagger·OpenAPI 200 응답과 임시 Qdrant 동일 경로 재시작을 확인했다. 사용자 레시피·실제 LLM 정확도 검사는 수행하지 않았다.
+- 현재 실행 상태: 8000번에서 이전 SimpleHTTP 서버의 홈페이지 200 및 /docs·/openapi.json 404를 확인했다. 새 서버의 8000 바인딩은 WinError 10048로 실패한 뒤 자원을 정리했다. 기존 프로세스는 종료하지 않았으며 사용자가 해당 터미널에서 Ctrl+C 후 기존 명령으로 재실행해야 한다.
+- 관련 파일: server.py, api_schemas.py, tests/test_http.py, requirements-graph.txt, requirements-graph.lock.txt, README.md, AGENTS.md. commit·push는 수행하지 않았다.

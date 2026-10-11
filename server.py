@@ -1,6 +1,5 @@
 """한입노트의 로컬 HTTP API, 정적 파일 제공, YouTube 수집 진입점."""
 
-from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from urllib.request import Request, urlopen
@@ -13,6 +12,17 @@ import uuid
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
+from contextlib import asynccontextmanager
+from typing import Any
+from fastapi import FastAPI, Request as APIRequest
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.concurrency import run_in_threadpool
+from api_schemas import (AnalyzeInput, JobAccepted, RetryInput, ReviewInput,
+    PantryInput, PantryOutput, ReindexInput, EmptyInput, ImportInput, ImportOutput,
+    RecipesOutput, SearchOutput, JobOutput, ReindexOutput, ReindexAllOutput, ErrorOutput,
+    StatusOutput, HealthOutput)
 from storage import Store, public
 from integrations import Ollama, QdrantIndex
 from workflows import Pipelines
@@ -29,7 +39,6 @@ os.environ['LANGCHAIN_TRACING_V2'] = 'false'
 
 # Windows TEMP 권한 문제를 피하기 위해 앱 임시 파일을 전용 폴더에 만듭니다.
 RUNTIME_DIR = Path(os.environ.get('RECIPE_RUNTIME_DIR', str(ROOT / '.runtime'))).resolve()
-RUNTIME_DIR.mkdir(exist_ok=True)
 os.environ["TEMP"] = str(RUNTIME_DIR)
 os.environ["TMP"] = str(RUNTIME_DIR)
 tempfile.tempdir = str(RUNTIME_DIR)
@@ -39,12 +48,12 @@ os.environ["NO_PROXY"] = "*"
 os.environ["no_proxy"] = "*"
 
 DATA_DIR = Path(os.environ.get('RECIPE_DATA_DIR',str(ROOT / 'data')))
-DATA_DIR.mkdir(exist_ok=True)
-STORE = Store(DATA_DIR / 'recipe.db')
+STORE = None
 PIPELINES = None
-WORKER = ThreadPoolExecutor(max_workers=1)
+WORKER = None
 ACTIVE = set()
 ACTIVE_LOCK = Lock()
+PIPELINES_LOCK = Lock()
 
 def pipelines():
     """공유 LangGraph 파이프라인 묶음을 최초 요청 시 한 번 생성한다.
@@ -58,10 +67,11 @@ def pipelines():
         이후 호출은 동일 객체를 반환한다.
     """
     global PIPELINES
-    if PIPELINES is None:
-        llm = Ollama()
-        qdrant_path = os.environ.get('QDRANT_PATH')
-        PIPELINES = Pipelines(STORE, llm, QdrantIndex(llm,qdrant_path or DATA_DIR / 'qdrant'), extract_transcript, str(DATA_DIR / 'checkpoints.db'))
+    with PIPELINES_LOCK:
+        if PIPELINES is None:
+            llm = Ollama()
+            qdrant_path = os.environ.get('QDRANT_PATH')
+            PIPELINES = Pipelines(STORE, llm, QdrantIndex(llm, qdrant_path or DATA_DIR / 'qdrant'), extract_transcript, str(DATA_DIR / 'checkpoints.db'))
     return PIPELINES
 
 def submit_job(id, payload=None, resume=None):
@@ -251,157 +261,326 @@ def extract_transcript(video_url):
     except Exception as whisper_error:
         raise RuntimeError(f"자막 API: {subtitle_error} / 로컬 Whisper: {whisper_error}")
 
-class RecipeHandler(SimpleHTTPRequestHandler):
-    """한입노트 JSON API와 허용된 정적 파일만 제공하는 HTTP 핸들러."""
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """서버 시작·종료에 자원을 연결한다.
 
-    def send_json(self, status, body):
-        """Python 값을 UTF-8 JSON HTTP 응답으로 전송한다.
+    Args:
+        application: 수명을 관리할 FastAPI 앱.
+    Yields:
+        초기화된 서버의 요청 처리 구간.
+    Side Effects:
+        전용 임시 폴더·SQLite·단일 작업자를 준비한다. 종료 시 진행 작업을
+        기다리고 체크포인트·Qdrant 파일 잠금을 닫는다. import만으로 DB를 열지 않는다.
+    """
+    global STORE, WORKER, PIPELINES
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    if STORE is None:
+        STORE = Store(DATA_DIR / 'recipe.db')
+    WORKER = ThreadPoolExecutor(max_workers=1)
+    try:
+        yield
+    finally:
+        await run_in_threadpool(WORKER.shutdown, wait=True)
+        WORKER = None
+        try:
+            if PIPELINES is not None:
+                try:
+                    PIPELINES.checkpoint_db.close()
+                finally:
+                    PIPELINES.index.close()
+        finally:
+            PIPELINES = None
+            STORE = None
+            ACTIVE.clear()
+
+
+ERROR_RESPONSES = {
+    code: {'model': ErrorOutput, 'description': description}
+    for code, description in {
+        404: '대상을 찾을 수 없음', 415: 'JSON Content-Type 필요',
+        422: '입력 또는 작업 상태 오류', 502: '외부 연결 오류',
+        500: '예상하지 못한 서버 오류',
+    }.items()
+}
+app = FastAPI(
+    title='한입노트 API', version='1.0.0',
+    description='로컬 레시피 북 API. 분석은 202의 job_id로 상태를 조회합니다. '
+                'Try it out의 저장·분석·재색인 요청은 실제 데이터를 변경합니다.',
+    lifespan=lifespan, responses=ERROR_RESPONSES,
+    openapi_tags=[
+        {'name': '상태', 'description': 'SQLite·Ollama·Qdrant 준비 상태'},
+        {'name': '레시피', 'description': '원본 조회와 과거 데이터 이관'},
+        {'name': '분석', 'description': '비동기 분석·검토·재시도'},
+        {'name': '냉장고', 'description': '보유 재료 조회·교체'},
+        {'name': '검색', 'description': '재료·의미 검색과 추천'},
+        {'name': '인덱스', 'description': '원본을 보존하며 검색 인덱스 재생성'},
+    ],
+)
+
+
+class JSONBodyLimit:
+    """API POST 본문을 2MB 이내 JSON 객체로 제한하는 ASGI 미들웨어."""
+
+    def __init__(self, app):
+        """다음 ASGI 앱을 보관한다. 외부 호출·파일 쓰기는 수행하지 않는다."""
+        self.application = app
+
+    async def __call__(self, scope, receive, send):
+        """본문을 제한 내에서 수집·검증하고 FastAPI에 재전달한다.
 
         Args:
-            status: HTTP 상태 코드 정수.
-            body: ``json.dumps``로 직렬화 가능한 응답 값.
-
+            scope, receive, send: ASGI 연결 정보와 수신·송신 콜백.
         Returns:
-            반환값 없음. 상태·헤더·본문을 클라이언트 소켓에 쓴다.
+            없음. 유효 본문은 전달하고 잘못된 본문은 오류 JSON으로 응답한다.
         """
-        encoded = json.dumps(body, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(encoded)))
-        self.end_headers()
-        self.wfile.write(encoded)
-
-    def do_GET(self):
-        """상태·레시피·냉장고·작업 조회 또는 허용된 정적 파일을 처리한다.
-
-        Returns:
-            반환값 없음. 경로에 따라 JSON/정적 파일 응답을 직접 전송한다.
-
-        Routes:
-            ``/api/health`` 전체 준비 상태, ``/api/recipes`` 레시피 목록,
-            ``/api/pantry`` 냉장고, ``/api/jobs/<id>`` 작업 상태,
-            ``/api/status`` Ollama 모델 상태를 반환한다. 그 외에는 명시적으로
-            허용한 UI 파일만 제공하고 내부 파일은 404로 차단한다.
-        """
-        route = self.path.split('?',1)[0]
-        if route == '/api/health':
-            self.send_json(200,service_health(STORE,pipelines().index)); return
-        if route == '/api/recipes':
-            self.send_json(200, {'recipes':[public(r) for r in STORE.all()]}); return
-        if route == '/api/pantry':
-            self.send_json(200, {'pantry':STORE.pantry()}); return
-        if route.startswith('/api/jobs/'):
-            job=STORE.job(route.rsplit('/',1)[1])
-            self.send_json(200 if job else 404, job or {'error':'작업이 없습니다.'}); return
-        if self.path.split("?", 1)[0] == "/api/status":
-            base_url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
-            model = os.environ.get("OLLAMA_MODEL", "gemma4:latest")
-            try:
-                request = Request(f"{base_url.rstrip('/')}/api/tags", headers={"User-Agent": "HanipNote"})
-                with urlopen(request, timeout=2) as response:
-                    payload = json.loads(response.read().decode())
-                names = [item.get("name") for item in payload.get("models", [])]
-                installed=model in names or (':' not in model and model+':latest' in names)
-                self.send_json(200, {"running": True, "model": model, "modelInstalled": installed, "models": names})
-            except Exception:
-                self.send_json(200, {"running": False, "model": model, "modelInstalled": False, "models": []})
+        if scope['type'] != 'http' or scope['method'] != 'POST' or not scope['path'].startswith('/api/'):
+            await self.application(scope, receive, send)
             return
-        # Never expose SQLite, checkpoints, source code or temporary audio via static serving.
-        if route not in {'/','/index.html','/app.js','/styles.css','/assets/og.png'}:
-            self.send_error(404); return
-        super().do_GET()
-
-    def do_HEAD(self):
-        """HEAD 요청을 지원하지 않고 405 Method Not Allowed를 반환한다.
-
-        Returns:
-            반환값 없음. 오류 응답을 직접 전송한다.
-        """
-        self.send_error(405)
-
-    def do_POST(self):
-        """JSON 기반 변경·분석·검색 API 요청을 검증하고 라우팅한다.
-
-        Returns:
-            반환값 없음. 각 경로의 JSON 응답을 직접 전송한다.
-
-        Routes:
-            ``/api/analyze`` 작업 생성, ``/api/review`` 사용자 확인 재개,
-            ``/api/retry`` 실패 작업 재시도, ``/api/pantry`` 냉장고 교체,
-            ``/api/search`` 추천, ``/api/reindex`` 개별 재색인,
-            ``/api/reindex-all`` 전체 재색인, ``/api/import`` 과거 브라우저
-            레시피 이관을 처리한다.
-
-        Error Responses:
-            Content-Type 오류는 415, 입력·업무 규칙 오류는 422, 외부 연결
-            오류는 502, 예상하지 못한 예외는 500 JSON으로 변환한다. 요청
-            본문은 1바이트 이상 2MB 이하의 JSON 객체여야 한다.
-        """
+        headers = dict(scope['headers'])
+        content_type = headers.get(b'content-type', b'').decode().split(';')[0].strip().lower()
+        if content_type != 'application/json':
+            await JSONResponse({'error': 'application/json 요청만 지원합니다.'}, status_code=415)(scope, receive, send)
+            return
         try:
-            if self.headers.get('Content-Type','').split(';')[0] != 'application/json':
-                self.send_json(415,{'error':'application/json 요청만 지원합니다.'}); return
-            size = int(self.headers.get("Content-Length", "0"))
-            if size < 1 or size > 2_000_000: raise ValueError('요청 크기를 확인해 주세요.')
-            body = json.loads(self.rfile.read(size).decode("utf-8"))
-            if not isinstance(body,dict): raise ValueError('JSON 객체가 필요합니다.')
-            if self.path == '/api/analyze':
-                payload={'url':str(body.get('url','')).strip(),'text':str(body.get('text','')).strip()}
-                id=str(uuid.uuid4()); STORE.job(id,status='queued',payload=payload)
-                submit_job(id,payload)
-                self.send_json(202,{'job_id':id}); return
-            if self.path in {'/api/review','/api/retry'}:
-                id=body['job_id']; job=STORE.job(id)
-                if not job or job['status'] not in {'review','failed','running','queued'}: raise ValueError('재개할 작업이 없습니다.')
-                if self.path == '/api/review' and job['status']!='review': raise ValueError('확인 대기 중인 작업이 아닙니다.')
-                if self.path == '/api/retry' and job['status']=='review': raise ValueError('검토 내용을 확인해 주세요.')
-                if self.path == '/api/review':
-                    if body.get('approved') is not True: raise ValueError('확인 후 저장해 주세요.')
-                    body['recipe']=normalize(body.get('recipe') or job['result']['recipe'])
-                submit_job(id,resume=body if self.path=='/api/review' else None)
-                self.send_json(202,{'job_id':id}); return
-            if self.path == '/api/pantry':
-                items=SearchInput(pantry=body.get('pantry',[])).pantry
-                self.send_json(200,{'pantry':STORE.pantry(sorted({canonical(x) for x in items if x.strip()}))}); return
-            if self.path == '/api/search':
-                req=SearchInput.model_validate(body).model_dump()
-                future=WORKER.submit(lambda:pipelines().search.invoke({'request':req})['result'])
-                self.send_json(200,future.result()); return
-            if self.path == '/api/reindex':
-                future=WORKER.submit(lambda:pipelines().reindex(body['id']))
-                self.send_json(200,future.result()); return
-            if self.path == '/api/reindex-all':
-                future=WORKER.submit(lambda:pipelines().reindex_all())
-                self.send_json(200,future.result()); return
-            if self.path == '/api/import':
-                count=0; errors=[]
-                for old in body.get('recipes',[]):
-                    try:
-                        r=normalize({'title':old['title'],'category':old.get('category','요리'),'time':old.get('time') or None,
-                            'ingredients':[{'raw_name':x,'name':x} for x in old['ingredients']], 'steps':old['steps']})
-                        key='legacy:'+str(old['id'])
-                        STORE.save(str(uuid.uuid5(uuid.NAMESPACE_URL,key)),key,old.get('source',''),'',r,semantic(r,''),'legacy'); count+=1
-                    except (ValueError,KeyError,TypeError) as e: errors.append(str(e))
-                self.send_json(200,{'imported':count,'errors':errors}); return
-            self.send_json(404,{'error':'Not found'})
-        except (ValueError, RuntimeError, KeyError, TypeError) as error:
-            self.send_json(422, {"error": str(error)})
-        except (HTTPError, URLError, TimeoutError) as error:
-            self.send_json(502, {"error": "이 컴퓨터에서 YouTube 서버 연결이 차단됐어요. Ollama 문제가 아닙니다.", "detail": "인터넷 연결/프록시를 확인하거나, 자막 텍스트를 직접 입력하는 방식으로 테스트해 주세요. " + str(error)})
-        except Exception as error:
-            self.send_json(500, {"error": "분석 중 알 수 없는 오류가 발생했어요.", "detail": str(error)})
+            if b'content-length' in headers:
+                size = int(headers[b'content-length'])
+                if not 1 <= size <= 2_000_000:
+                    raise ValueError('요청 크기를 확인해 주세요.')
+            body = bytearray()
+            while True:
+                message = await receive()
+                if message['type'] == 'http.disconnect':
+                    return
+                body.extend(message.get('body', b''))
+                if len(body) > 2_000_000:
+                    raise ValueError('요청 크기를 확인해 주세요.')
+                if not message.get('more_body', False):
+                    break
+            if not body:
+                raise ValueError('요청 크기를 확인해 주세요.')
+            parsed = json.loads(body.decode('utf-8'))
+            if not isinstance(parsed, dict):
+                raise ValueError('JSON 객체가 필요합니다.')
+        except (ValueError, UnicodeError) as error:
+            await JSONResponse({'error': str(error)}, status_code=422)(scope, receive, send)
+            return
 
-if __name__ == "__main__":
+        delivered = False
+
+        async def replay_body():
+            """검증한 본문을 한 번 전달한 후 실제 연결 수신을 계속한다."""
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {'type': 'http.request', 'body': bytes(body), 'more_body': False}
+            return await receive()
+
+        await self.application(scope, replay_body, send)
+
+
+app.add_middleware(JSONBodyLimit)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: APIRequest, error: RequestValidationError):
+    """Pydantic 입력 오류를 기존 error 필드의 422 JSON으로 변환한다."""
+    issues = [{'loc': list(x['loc']), 'msg': x['msg'], 'type': x['type']} for x in error.errors()]
+    return JSONResponse({'error': '입력값을 확인해 주세요.', 'detail': issues}, status_code=422)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_error(request: APIRequest, error: StarletteHTTPException):
+    """404·405 등 HTTP 오류를 JSON으로 반환한다. 원래 상태 코드를 보존한다."""
+    return JSONResponse({'error': str(error.detail)}, status_code=error.status_code, headers=error.headers)
+
+
+async def business_error(request: APIRequest, error: Exception):
+    """입력·업무 상태 예외를 422로 반환한다. 원본 저장소는 변경하지 않는다."""
+    return JSONResponse({'error': str(error)}, status_code=422)
+
+
+for error_type in (ValueError, RuntimeError, KeyError, TypeError):
+    app.add_exception_handler(error_type, business_error)
+
+
+async def connection_error(request: APIRequest, error: Exception):
+    """외부 연결 오류를 502 JSON으로 반환한다."""
+    return JSONResponse({'error': '외부 서비스에 연결하지 못했어요.', 'detail': str(error)}, status_code=502)
+
+
+for error_type in (HTTPError, URLError, TimeoutError):
+    app.add_exception_handler(error_type, connection_error)
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request: APIRequest, error: Exception):
+    """예상하지 못한 오류를 500 JSON으로 반환한다."""
+    return JSONResponse({'error': '분석 중 알 수 없는 오류가 발생했어요.', 'detail': str(error)}, status_code=500)
+
+
+@app.get('/api/health', tags=['상태'], summary='전체 구성 요소 준비 상태', response_model=HealthOutput)
+def get_health() -> dict[str, Any]:
+    """SQLite·Ollama·임베딩·Qdrant를 검사한 준비 상태 사전을 반환한다."""
+    return service_health(STORE, pipelines().index)
+
+
+@app.get('/api/status', tags=['상태'], summary='Ollama 실행 및 생성 모델 상태', response_model=StatusOutput)
+def get_status() -> dict[str, Any]:
+    """Ollama 모델 목록을 조회한다. 연결 실패도 running=false인 200으로 반환한다."""
+    base_url = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11434').rstrip('/')
+    model = os.environ.get('OLLAMA_MODEL', 'gemma4:latest')
+    try:
+        request = Request(f'{base_url}/api/tags', headers={'User-Agent': 'HanipNote'})
+        with urlopen(request, timeout=2) as response:
+            payload = json.loads(response.read().decode())
+        names = [item.get('name') for item in payload.get('models', [])]
+        installed = model in names or (':' not in model and model + ':latest' in names)
+        return {'running': True, 'model': model, 'modelInstalled': installed, 'models': names}
+    except Exception:
+        return {'running': False, 'model': model, 'modelInstalled': False, 'models': []}
+
+
+@app.get('/api/recipes', tags=['레시피'], summary='저장된 레시피 목록·상세', response_model=RecipesOutput)
+def get_recipes():
+    """SQLite 전체 원본을 UI 공개 형식의 recipes 목록으로 반환한다."""
+    return {'recipes': [public(row) for row in STORE.all()]}
+
+
+@app.get('/api/pantry', tags=['냉장고'], summary='보유 재료 조회', response_model=PantryOutput)
+def get_pantry():
+    """저장된 냉장고 재료명 목록을 반환한다. 데이터를 변경하지 않는다."""
+    return {'pantry': STORE.pantry()}
+
+
+@app.get('/api/jobs/{job_id}', tags=['분석'], summary='분석 작업 상태·결과 조회', response_model=JobOutput)
+def get_job(job_id: str):
+    """작업 ID로 상태 사전을 조회한다. 없는 ID는 404 오류 JSON을 반환한다."""
+    job = STORE.job(job_id)
+    if job is None:
+        raise StarletteHTTPException(404, '작업이 없습니다.')
+    return job
+
+
+@app.post('/api/analyze', tags=['분석'], summary='URL 또는 텍스트 분석 시작', status_code=202, response_model=JobAccepted)
+def analyze(body: AnalyzeInput):
+    """url/text 요청을 큐에 넣고 job_id를 반환한다. 완료 결과는 상태 API로 조회한다."""
+    payload = {'url': body.url.strip(), 'text': body.text.strip()}
+    job_id = str(uuid.uuid4())
+    STORE.job(job_id, status='queued', payload=payload)
+    submit_job(job_id, payload)
+    return {'job_id': job_id}
+
+
+def resume_job(job_id: str, review: ReviewInput | None = None):
+    """기존 작업 상태를 검사하고 재시도 또는 승인 결과로 재개한다.
+
+    Args:
+        job_id: 저장된 작업 ID.
+        review: 검토 승인 요청. None이면 실패·중단 작업을 재시도한다.
+    Returns:
+        재개된 작업의 job_id 사전.
+    Raises:
+        ValueError: 작업 상태·승인·수정 레시피가 유효하지 않을 때.
+    """
+    job = STORE.job(job_id)
+    if not job or job['status'] not in {'review', 'failed', 'running', 'queued'}:
+        raise ValueError('재개할 작업이 없습니다.')
+    if review is not None:
+        if job['status'] != 'review':
+            raise ValueError('확인 대기 중인 작업이 아닙니다.')
+        if review.approved is not True:
+            raise ValueError('확인 후 저장해 주세요.')
+        payload = review.model_dump()
+        payload['recipe'] = normalize(review.recipe or job['result']['recipe'])
+        submit_job(job_id, resume=payload)
+    else:
+        if job['status'] == 'review':
+            raise ValueError('검토 내용을 확인해 주세요.')
+        submit_job(job_id)
+    return {'job_id': job_id}
+
+
+@app.post('/api/review', tags=['분석'], summary='검토 승인·수정 후 저장', status_code=202, response_model=JobAccepted)
+def review_job(body: ReviewInput):
+    """검토 입력을 검증해 재개한다. 실패 시 대기 체크포인트를 보존한다."""
+    return resume_job(body.job_id, body)
+
+
+@app.post('/api/retry', tags=['분석'], summary='실패·중단 분석 재시도', status_code=202, response_model=JobAccepted)
+def retry_job(body: RetryInput):
+    """기존 작업 ID로 수집을 재시도하고 같은 job_id를 반환한다."""
+    return resume_job(body.job_id)
+
+
+@app.post('/api/pantry', tags=['냉장고'], summary='냉장고 목록 교체', response_model=PantryOutput)
+def save_pantry(body: PantryInput):
+    """입력 재료명을 정규화·중복 제거해 SQLite에 교체 저장하고 반환한다."""
+    return {'pantry': STORE.pantry(sorted({canonical(item) for item in body.pantry if item.strip()}))}
+
+
+@app.post('/api/search', tags=['검색'], summary='재료·자연어·조건 추천', response_model=SearchOutput)
+def search(body: SearchInput):
+    """검색 입력을 단일 작업자에 제출한다. 결과·팁·경고 사전을 기다려 반환한다."""
+    request = body.model_dump()
+    future = WORKER.submit(lambda: pipelines().search.invoke({'request': request})['result'])
+    return future.result()
+
+
+@app.post('/api/reindex', tags=['인덱스'], summary='레시피 한 건 재색인', response_model=ReindexOutput)
+def reindex(body: ReindexInput):
+    """입력 id 원본을 단일 작업자에서 재색인해 결과를 반환한다. 원본은 보존한다."""
+    return WORKER.submit(lambda: pipelines().reindex(body.id)).result()
+
+
+@app.post('/api/reindex-all', tags=['인덱스'], summary='대기·실패 레시피 일괄 재색인', response_model=ReindexAllOutput)
+def reindex_all(body: EmptyInput):
+    """현재 백엔드·모델에 재색인이 필요한 원본만 처리하고 성공·실패 요약을 반환한다."""
+    return WORKER.submit(lambda: pipelines().reindex_all()).result()
+
+
+@app.post('/api/import', tags=['레시피'], summary='과거 브라우저 레시피 이관', response_model=ImportOutput)
+def import_recipes(body: ImportInput):
+    """과거 입력을 원본에 멱등 저장하고 처리 건수·항목별 오류 목록을 반환한다."""
+    count = 0
+    errors = []
+    for old in body.recipes:
+        try:
+            recipe = normalize({
+                'title': old['title'], 'category': old.get('category', '요리'),
+                'time': old.get('time') or None,
+                'ingredients': [{'raw_name': item, 'name': item} for item in old['ingredients']],
+                'steps': old['steps'],
+            })
+            key = 'legacy:' + str(old['id'])
+            STORE.save(str(uuid.uuid5(uuid.NAMESPACE_URL, key)), key, old.get('source', ''),
+                       '', recipe, semantic(recipe, ''), 'legacy')
+            count += 1
+        except (ValueError, KeyError, TypeError) as error:
+            errors.append(str(error))
+    return {'imported': count, 'errors': errors}
+
+
+@app.get('/', include_in_schema=False)
+@app.get('/{path:path}', include_in_schema=False)
+def frontend(path: str = ''):
+    """허용한 UI 파일만 제공한다. 설정·소스·DB·임시 파일·기타 경로는 404다."""
+    files = {'': 'index.html', 'index.html': 'index.html', 'app.js': 'app.js',
+             'styles.css': 'styles.css', 'assets/og.png': 'assets/og.png'}
+    if path not in files:
+        raise StarletteHTTPException(404, 'Not found')
+    file = ROOT / files[path]
+    if not file.is_file():
+        raise StarletteHTTPException(404, 'Not found')
+    return FileResponse(file)
+
+
+if __name__ == '__main__':
+    import uvicorn
+
     host = os.environ.get('APP_HOST', '127.0.0.1')
     port = int(os.environ.get('APP_PORT', '8000'))
-    httpd = ThreadingHTTPServer((host, port), RecipeHandler)
-    display_host = 'localhost' if host in {'127.0.0.1','localhost'} else host
-    print(f"한입노트가 http://{display_host}:{port} 에서 실행 중입니다.", flush=True)
-    print("SQLite 원본 DB + LangGraph + 로컬 Ollama + Qdrant Local 검색 인덱스", flush=True)
-    try: httpd.serve_forever()
-    except KeyboardInterrupt: print("서버를 종료합니다.", flush=True)
-    finally:
-        httpd.server_close()
-        WORKER.shutdown(wait=True)
-        if PIPELINES:
-            PIPELINES.checkpoint_db.close()
-            PIPELINES.index.close()
+    display_host = 'localhost' if host in {'127.0.0.1', 'localhost'} else host
+    print(f'한입노트가 http://{display_host}:{port} 에서 실행됩니다.', flush=True)
+    print(f'API 문서: http://{display_host}:{port}/docs', flush=True)
+    uvicorn.run(app, host=host, port=port, workers=1)

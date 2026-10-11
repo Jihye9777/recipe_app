@@ -6,3 +6,7 @@ pydantic>=2.10,<3
 python-dotenv>=1.0,<2
 qdrant-client>=1.19,<2
 requests>=2.32,<3
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+# FastAPI TestClient (also used by existing integrations)
+httpx>=0.28,<1
