@@ -194,3 +194,9 @@ Git에서 확인한 관련 커밋:
 - 우선순위: 이 기록부터 종전의 시작 시 CONTEXT.md 읽기·현재 상태 갱신 규칙은 폐기한다. 최신 작업 규칙은 AGENTS.md에만 둔다. 기존 기록은 과거 이력으로 보존한다.
 - 관련 파일: AGENTS.md, CONTEXT.md. 문서만 변경했으며 앱 테스트는 재실행하지 않는다. 문서 diff·공백 오류·기존 이력 보존을 확인한다.
 - 한계: 기록을 기본 컨텍스트에서 제외하는 에이전트 지침이다. OS 접근 차단이나 별도 자동 append 서비스는 도입하지 않았다.
+
+### 2026-10-11 — 영어 Coding Principles 추가
+
+- 요청·변경: 커뮤니티의 Karpathy-inspired CLAUDE.md를 참고해 Think Before Coding, Simplicity First, Surgical Changes, Goal-Driven Execution을 영어로 AGENTS.md에 추가했다. 중요한 가정·모호함, 최소 구현, 변경 범위, 관찰 가능한 검증 기준을 구체화하고 기존 중복 문장을 줄였다.
+- 적용: 사소한 선택은 자율 진행하며 삭제·설치·Git 작업에는 기존 승인 규칙을 적용한다. 원문 링크와 각색 사실을 명시했다.
+- 관련 파일: AGENTS.md, CONTEXT.md. 문서 diff·공백·append-only 보존을 검토하며 실행 코드 변경이 없어 앱 테스트는 재실행하지 않는다.

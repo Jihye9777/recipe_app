@@ -6,6 +6,40 @@ YouTube URL·텍스트를 개인 레시피로 저장하고 냉장고 재료로 �
 Python 3.11+ / `.venv-graph` / http.server / LangGraph / SQLite / Qdrant Local / Ollama.
 설치·API·파일 구조는 필요한 부분만 [README.md](README.md)에서 확인한다.
 
+## Coding Principles
+
+Adapted from [Karpathy-inspired guidelines](https://github.com/multica-ai/andrej-karpathy-skills/blob/main/CLAUDE.md). Use judgment for trivial tasks; the permission rules below still apply.
+
+### 1. Think Before Coding
+
+- Explain important assumptions and tradeoffs before implementation.
+- When interpretations would produce different results, describe them and clarify the intended outcome.
+- Recommend a simpler solution when appropriate; challenge unnecessary complexity.
+- Pause only the work dependent on unresolved requirements. Make routine choices independently.
+
+### 2. Simplicity First
+
+- Implement the smallest solution satisfying the request.
+- Avoid speculative features, premature abstractions, and unrequested configurability.
+- Handle realistic failures without inventing impossible scenarios.
+- Reconsider code that could accomplish the same goal substantially more simply.
+
+### 3. Surgical Changes
+
+- Change only code directly necessary for the requested outcome.
+- Preserve surrounding formatting, comments, and conventions; avoid unrelated refactoring.
+- Report unrelated dead code rather than removing it.
+- Clean up dependencies made unused by your changes, subject to the permission rules.
+- Check that every changed line has a reason tied to the task.
+
+### 4. Goal-Driven Execution
+
+- Translate the request into observable success criteria.
+- Verify invalid inputs for validation changes; reproduce bugs before checking the fix.
+- Confirm behavior before and after refactoring.
+- For multi-step work, pair each planned step with a verification method.
+- Continue until the criteria are verified, or report the concrete blocker and remaining uncertainty.
+
 ## 실행·검증
 
 프로젝트 루트에서 실행한다. 별도 프론트엔드 빌드·포매터·린터 설정은 없다.
@@ -40,7 +74,7 @@ Python 3.11+ / `.venv-graph` / http.server / LangGraph / SQLite / Qdrant Local /
 ## 코드·데이터 규칙
 
 - Python: 4칸, `snake_case`, 클래스 `PascalCase`, 상수 `UPPER_SNAKE_CASE`. 함수·클래스의 한국어 docstring에 입력·반환·예외·부작용을 설명한다.
-- JS: 2칸, `camelCase`, `const` 우선, 세미콜론 사용. 주변 형식을 유지하고 무관한 전체 리팩터링은 하지 않는다.
+- JS: 2칸, `camelCase`, `const` 우선, 세미콜론 사용.
 - SQLite는 원본, Qdrant는 재생성 가능한 인덱스다. 인덱스 실패 시 원본·오류 상태를 보존하고 같은 UUID로 upsert한다.
 - 수집은 자막 API → pytubefix/로컬 Whisper, 직접 텍스트 입력을 유지한다. yt-dlp·유료 AI 폴백·클라우드 추적을 추가하지 않는다.
 - 원문 근거를 보존하고 미상 값은 null로 둔다. 불확실한 결과는 사용자 확인으로 보내며 맵기·알레르기 추정을 확정 사실로 표시하지 않는다.
