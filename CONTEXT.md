@@ -216,3 +216,27 @@ Git에서 확인한 관련 커밋:
 - 검증: 전환 전 19개 테스트 통과, 신규 문서 테스트 2개의 404 실패를 확인한 뒤 구현했다. 최종 25개 테스트와 pip check 통과. 임시 포트의 실제 Uvicorn에서 홈페이지·Swagger·OpenAPI 200 응답과 임시 Qdrant 동일 경로 재시작을 확인했다. 사용자 레시피·실제 LLM 정확도 검사는 수행하지 않았다.
 - 현재 실행 상태: 8000번에서 이전 SimpleHTTP 서버의 홈페이지 200 및 /docs·/openapi.json 404를 확인했다. 새 서버의 8000 바인딩은 WinError 10048로 실패한 뒤 자원을 정리했다. 기존 프로세스는 종료하지 않았으며 사용자가 해당 터미널에서 Ctrl+C 후 기존 명령으로 재실행해야 한다.
 - 관련 파일: server.py, api_schemas.py, tests/test_http.py, requirements-graph.txt, requirements-graph.lock.txt, README.md, AGENTS.md. commit·push는 수행하지 않았다.
+
+### 2026-10-11 — cloudflared 명령 인식 진단
+
+- winget은 설치됨으로 표시하지만 사용자의 PowerShell에서 명령을 찾지 못했다. 실행 파일은 C:\Program Files (x86)\cloudflared\cloudflared.exe에 존재하며 전체 경로로 --version 실행 시 2026.10.0을 확인했다.
+- tunnel --help에서 --allowed-mail 지원도 확인했다. 전체 경로 실행 방법을 안내하며, PATH 영구 변경·재설치·터널 공개 실행은 수행하지 않았다. 관련 변경 파일: CONTEXT.md.
+
+### 2026-10-11 — 종이 레시피 저널 디자인 가이드
+
+- 사용자가 제공한 YAML front matter + Markdown 형식과 바인더·손글씨 레시피·수채화 요리 참고 이미지에 맞춰 docs/design/recipe-journal.md를 작성했다. 종이·잉크·토마토·올리브 토큰, 타이포그래피, 레이아웃, 컴포넌트, 일러스트, 접근성 및 금지 사항을 명시했다.
+- .codex/agents/ui-designer.toml은 Codex TOML 형식을 유지하고 해당 가이드를 작업 전에 읽도록 연결했다. 웹페이지·이미지·백엔드는 변경하지 않았다.
+- 검증: Python tomllib 및 기존 PyYAML로 TOML/YAML 파싱, 필수 메타데이터와 가이드 참조 확인 통과. git diff --check 통과. 실제 에이전트 호출·UI 시각 검증은 실행하지 않았다. 기존 staged 변경을 보존하고 commit·push·패키지 설치는 하지 않았다.
+
+### 2026-10-11 — 디자인 에이전트로 레시피 저널 UI 적용
+
+- 사용자 요청에 따라 ui-designer 서브에이전트에 .codex/agents/ui-designer.toml의 지침을 적용해 index.html, styles.css, app.js를 수정했다. 도구의 전용 agent_type 선택 필드가 없어 TOML 지침을 읽어 역할에 적용했다. 세이지 배경·크림 종이·바인더·토마토/올리브·inline 손그림 SVG 및 밝은 레시피 카드를 도입하고 기존 OG 파일을 보존했다.
+- 입력 라벨, 본문 건너뛰기, 메뉴 aria-current, 추천 Space 키, reduced-motion, 빈 화면 CTA와 최소 44px 터치 영역을 보완했다. 실제 브라우저에서 예전 CSS/JS 캐시 혼합을 재현해 파일 주소에 recipe-journal-2 버전을 붙였다. tests/test_ui.cjs에 접근성·키보드·URL 요청 계약·빈 화면 동작을 추가했다.
+- 검증: 기존 DOM suite PASS 후 source-text 라벨 누락 red를 확인하고 구현 후 확장 DOM suite 및 JS 문법 검사 PASS. 브라우저에서 360/768/1280px × 레시피 북/가져오기/냉장고 9조합 가로 넘침 없음, 키보드 저장 레시피 열기, 모바일 상세 한 열, 3px 포커스와 홈 버튼 44px 확인. 별도 read-only 리뷰도 중대/중요 문제 없음 및 DOM suite PASS. git diff --check 통과.
+- 화면 캡처: .runtime/design-preview/desktop.jpg, mobile.jpg. 임시 viewport는 기본 크기로 복구했다. 관련 파일: index.html, styles.css, app.js, tests/test_ui.cjs, CONTEXT.md. 사용자 데이터·백엔드·의존성은 변경하지 않았고 실제 YouTube/Whisper/LLM 신규 분석 및 Python 백엔드 테스트는 이번 UI 작업에서 실행하지 않았다. 기존 staged 변경 보존, commit·push 없음.
+
+### 2026-10-11 — 쿡다이어리 브랜딩·토끼 로고 시안
+
+- 사용자가 이름을 쿡다이어리로 바꾸고 요리 일기·따뜻한 코지 색감·토끼가 토마토 수프를 끓이는 로고를 요청했다. 기존 화면에 적용할 bounded 디자인 방향으로 버터 크림 종이, 코코아 잉크, 살구·테라코타 포인트를 제안하며 실제 화면 적용은 디자인 확인 후 진행할 단계다.
+- 내장 imagegen으로 투명 배경 손그림 토끼 요리사 로고 시안을 생성해 확인했다. 참고 이미지의 방·캐릭터를 복제하지 않고 토끼·냄비·수프로 새 구성을 만들었다. 미리보기 파일은 C:\Users\User\.codex\generated_images\01a0562b-96de-7ba0-8dcb-b1692d47f9b8\exec-6aec17cc-c9ee-4e8a-b02c-b4c9928c2388.png에 있다. 아직 프로젝트 asset 연결이나 화면·설정·DB 변경은 하지 않았다.
+- 기존 hanip-job-id/hanip-recipes 저장 키는 브랜딩 변경 시에도 보존할 계획이다. 후속 작업은 로고·방향 승인 후 브랜드 표기·디자인 토큰·가이드와 이미지 제공 경로를 연결하고 기능·모바일 검증을 수행하는 것이다.

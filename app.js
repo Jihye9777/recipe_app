@@ -16,15 +16,20 @@ function toast(message) {
 }
 function showView(name) {
   qsa('.view').forEach(el=>el.classList.toggle('active',el.id===`${name}-view`));
-  qsa('.nav-link').forEach(el=>el.classList.toggle('active',el.dataset.view===name));
+  qsa('.nav-link').forEach(el=>{
+    const active=el.dataset.view===name;
+    el.classList.toggle('active',active);
+    if(active) el.setAttribute('aria-current','page'); else el.removeAttribute('aria-current');
+  });
   if(name==='home') refreshRecipes().catch(e=>toast(e.message));
   if(name==='pantry') renderPantry();
-  window.scrollTo({top:0,behavior:'smooth'});
+  window.scrollTo({top:0,behavior:window.matchMedia?.('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
 }
 async function refreshRecipes() { recipes=(await api('/api/recipes')).recipes; renderRecipes(); }
 function renderRecipes() {
   qs('#recipe-count').textContent=`${recipes.length}개의 레시피 · SQLite`;
-  qs('#recipe-grid').innerHTML=recipes.map((r,i)=>`<article class="recipe-card" data-index="${i}" tabindex="0" role="button" style="--card-bg:linear-gradient(145deg,#733a2d,#c05b3e)"><div class="card-emoji">🍳</div><div class="recipe-meta"><span>${esc(r.category)}</span><span>${r.time ? esc(r.time)+'분':'시간 미상'}</span></div><h3>${esc(r.title)}</h3><p>${esc(r.ingredients.slice(0,4).join(' · '))}</p></article>`).join('') || '<p>아직 저장된 레시피가 없어요. 영상이나 텍스트를 가져와 주세요.</p>';
+  qs('#recipe-grid').innerHTML=recipes.map((r,i)=>`<article class="recipe-card" data-index="${i}" tabindex="0" role="button"><span class="recipe-number">RECIPE / ${String(i+1).padStart(2,'0')}</span><div class="recipe-meta"><span>${esc(r.category)}</span><span>${r.time ? esc(r.time)+'분':'시간 미상'}</span></div><h3>${esc(r.title)}</h3><p>${esc(r.ingredients.slice(0,4).join(' · '))}</p><span class="card-open">레시피 펼쳐보기 <span aria-hidden="true">↗</span></span></article>`).join('') || '<div class="empty-state"><span class="section-kicker">YOUR FIRST PAGE</span><h3>아직 비어 있는 레시피 북</h3><p>영상이나 텍스트에서 찾은 첫 레시피를 담아보세요.</p><button class="primary-button" id="empty-import">첫 레시피 담기</button></div>';
+  if(qs('#empty-import')) qs('#empty-import').onclick=()=>showView('import');
   qsa('#recipe-grid [data-index]').forEach(el=>{
     const open=()=>showSavedRecipe(recipes[Number(el.dataset.index)]);
     el.onclick=open; el.onkeydown=e=>{if(['Enter',' '].includes(e.key)){e.preventDefault();open();}};
@@ -97,7 +102,7 @@ async function renderRecommendations() {
     const out=await api('/api/search',{pantry,query:qs('#search-query').value,max_time:number('#max-time'),max_missing:number('#max-missing'),min_spice:number('#min-spice'),exclude_ingredients:commaList('#exclude'),allergens:commaList('#allergens'),tools:qs('#tools').value.trim()?commaList('#tools'):null,tips:qs('#tips').checked});
     if(version!==searchVersion)return;
     qs('#recommendations').innerHTML=out.warnings.map(x=>`<p class="helper">${esc(x)}</p>`).join('')+(out.recipes.map((r,i)=>`<article class="recommend-item" data-result="${i}" tabindex="0" role="button"><div><h3>${esc(r.title)}</h3><p>${r.missing.length?'부족: '+esc(r.missing.join(', ')):'재료 종류 일치 · 수량 확인 필요'}</p></div><div class="match"><strong>${r.coverage}%</strong>재료 종류 일치</div></article>`).join('')||'<p>조건에 맞는 레시피가 없어요. 알레르기 조건은 안전성 미검증 레시피를 모두 제외합니다.</p>')+(out.tips?`<div class="analysis-result"><h3>AI 조리 팁 · 검증되지 않은 제안</h3><p>${esc(out.tips)}</p></div>`:'');
-    qsa('[data-result]').forEach(el=>{el.onclick=()=>showSavedRecipe(out.recipes[Number(el.dataset.result)]);el.onkeydown=e=>{if(e.key==='Enter')el.click();};});
+    qsa('[data-result]').forEach(el=>{el.onclick=()=>showSavedRecipe(out.recipes[Number(el.dataset.result)]);el.onkeydown=e=>{if(['Enter',' '].includes(e.key)){e.preventDefault();el.click();}};});
   } catch(e){if(version===searchVersion)qs('#recommendations').textContent=e.message;}
 }
 async function refreshLlmStatus() {

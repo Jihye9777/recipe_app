@@ -31,6 +31,13 @@ async function main(){
   try{
     w.eval(fs.readFileSync(path.join(root,'app.js'),'utf8'));
     await waitFor(()=>w.document.querySelector('#recipe-grid .recipe-card'));
+    for (const id of ['youtube-url','source-text','ingredient-input']) {
+      const input=w.document.getElementById(id);
+      assert.ok(input.labels?.length || input.getAttribute('aria-label'), `${id} needs an accessible name independent of placeholder`);
+    }
+    const skip=w.document.querySelector('.skip-link');
+    assert.ok(skip && w.document.querySelector(skip.getAttribute('href')), 'skip link must reach the main content');
+    assert.equal(w.document.querySelector('.nav-link[data-view="home"]').getAttribute('aria-current'),'page');
     assert.equal(w.document.querySelector('#recipe-grid img'),null,'recipe title must be escaped');
     w.document.querySelector('#recipe-grid .recipe-card').click();
     assert.ok(w.document.querySelector('#analysis-area').textContent.includes('SQLite에 저장됨'));
@@ -38,8 +45,15 @@ async function main(){
     w.document.querySelector('#reindex').click();
     await waitFor(()=>w.document.querySelector('#index-message').textContent==='검색 인덱스 저장 완료');
     w.document.querySelector('[data-view="pantry"]').click();
+    assert.equal(w.document.querySelector('.nav-link[data-view="pantry"]').getAttribute('aria-current'),'page');
+    assert.equal(w.document.querySelector('.nav-link[data-view="home"]').hasAttribute('aria-current'),false);
     await waitFor(()=>w.document.querySelector('[data-result]'));
     assert.ok(w.document.querySelector('#recommendations').textContent.includes('수량 확인 필요'));
+    const recommendation=w.document.querySelector('[data-result]');
+    recommendation.dispatchEvent(new w.KeyboardEvent('keydown',{key:' ',bubbles:true,cancelable:true}));
+    assert.equal(w.document.querySelector('#import-view').classList.contains('active'),true,'Space must open a recommendation with button semantics');
+    w.document.querySelector('[data-view="pantry"]').click();
+    await waitFor(()=>w.document.querySelector('[data-result]'));
     w.document.querySelector('#ingredient-input').value='달걀';
     w.document.querySelector('#ingredient-form').dispatchEvent(new w.Event('submit',{cancelable:true}));
     await waitFor(()=>pantry.includes('달걀'));
@@ -47,6 +61,10 @@ async function main(){
     w.document.querySelector('#search-form').dispatchEvent(new w.Event('submit',{cancelable:true}));
     await waitFor(()=>seen.some(([url,b])=>url==='/api/search'&&b.max_missing===0));
     w.document.querySelector('[data-view="import"]').click();
+    w.document.querySelector('#youtube-url').value='https://www.youtube.com/watch?v=UUOpe_sTKzA';
+    w.document.querySelector('#url-form').dispatchEvent(new w.Event('submit',{cancelable:true}));
+    await waitFor(()=>w.document.querySelector('#approve'));
+    assert.ok(seen.some(([url,b])=>url==='/api/analyze'&&b.url==='https://www.youtube.com/watch?v=UUOpe_sTKzA'&&b.text===''),'URL form must preserve the analysis request contract');
     w.document.querySelector('#source-text').value='달걀 2개';
     w.document.querySelector('#text-form').dispatchEvent(new w.Event('submit',{cancelable:true}));
     await waitFor(()=>w.document.querySelector('#approve'));
@@ -59,7 +77,12 @@ async function main(){
     assert.equal(w.localStorage.getItem('hanip-job-id'),null);
     assert.ok(w.document.querySelector('#service-health').textContent.includes('검색 DB: 준비됨'));
     assert.equal(w.document.querySelector('#reindex-all').hidden,false);
-    console.log('PASS: SQL detail, HTML escaping, reindex, pantry, search filters, review validation/resume, saved-with-index-failure, health status');
+    saved=[];
+    w.document.querySelector('.nav-link[data-view="home"]').click();
+    await waitFor(()=>w.document.querySelector('#empty-import'));
+    w.document.querySelector('#empty-import').click();
+    assert.equal(w.document.querySelector('#import-view').classList.contains('active'),true,'empty recipe book action must open the existing import view');
+    console.log('PASS: accessible labels, skip link, current navigation, keyboard recommendation, SQL detail, HTML escaping, reindex, pantry, search filters, review validation/resume, saved-with-index-failure, health status');
   }finally{w.close();}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});
