@@ -258,3 +258,8 @@ Git에서 확인한 관련 커밋:
 - 사용자가 추가한 `assets/fonts/나눔손글씨 무궁화.ttf`를 로컬 @font-face로 등록하고 제목·브랜드·레시피 제목·짧은 메모에 적용했다. 작은 실측 글자 크기를 보완했고 재료·조리 순서·본문·입력·메타데이터 글꼴은 유지했다. 폰트 파일을 이동·삭제하거나 외부 폰트 서비스를 연결하지 않았다.
 - 관련 파일: `styles.css`, `index.html`(CSS 캐시 버전), `server.py`(정확한 폰트 경로 허용 및 font/ttf), `tests/test_http.py`, `README.md`, `docs/design/recipe-journal.md`. 폰트 배포 시 저작권 안내·라이선스 전문 동봉 필요를 README에 안내했으며 라이선스 파일은 아직 제공되지 않았다.
 - 검증: 한글·공백 폰트 URL이 404인 실패를 먼저 확인한 뒤 HTTP 테스트 통과. Python 27개 및 DOM 테스트 통과, scoped diff-check 정상. 승인받아 현재 8000번 서버만 재시작했다. 브라우저 한글 font check true·loaded, 360/768/1280px × 3화면에서 가로 넘침 없음. 최종 캡처 `.runtime/design-preview/cook-diary-font-desktop.jpg`, `cook-diary-font-mobile.jpg`, 기본 뷰포트 복구. 설치·데이터 변경·커밋·push 없음.
+
+### 2026-10-11 — 쿡다이어리 변경사항 새 브랜치 업로드 준비
+
+- 사용자 요청으로 `feat/cook-diary-branding-font` 브랜치를 현재 `88a3c07`에서 생성했다. 기존 변경은 이미 커밋되어 있어 재커밋하거나 이력을 변경하지 않았다. `origin`의 `Jihye9777/recipe_app`에 현재 이력과 이 검증 기록을 일반 push하며 PR·merge·force push는 하지 않는다.
+- 업로드 전 Python 27개 테스트, JS 문법 검사와 전체 DOM 테스트를 다시 실행해 통과했다. DB·실행 로그·인증 정보를 새로 stage하지 않는다. 이 기록 시점에는 원격 push 결과를 아직 확인하지 않았다.
