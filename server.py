@@ -20,13 +20,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.concurrency import run_in_threadpool
 from api_schemas import (AnalyzeInput, JobAccepted, RetryInput, ReviewInput,
-    PantryInput, PantryOutput, ReindexInput, EmptyInput, ImportInput, ImportOutput,
-    RecipesOutput, SearchOutput, JobOutput, ReindexOutput, ReindexAllOutput, ErrorOutput,
+    PantryInput, PantryOutput, ReindexInput, EmptyInput,
+    RecipesOutput, RecipeDeleted, SearchOutput, JobOutput, ReindexOutput, ReindexAllOutput, ErrorOutput,
     StatusOutput, HealthOutput)
 from storage import Store, public
 from integrations import Ollama, QdrantIndex
 from workflows import Pipelines
-from domain import normalize, semantic, canonical, SearchInput
+from domain import normalize, canonical, SearchInput
 from health import service_health
 
 ROOT = Path(__file__).resolve().parent
@@ -310,7 +310,7 @@ app = FastAPI(
     lifespan=lifespan, responses=ERROR_RESPONSES,
     openapi_tags=[
         {'name': '상태', 'description': 'SQLite·Ollama·Qdrant 준비 상태'},
-        {'name': '레시피', 'description': '원본 조회와 과거 데이터 이관'},
+        {'name': '레시피', 'description': '원본 조회와 레시피별 삭제'},
         {'name': '분석', 'description': '비동기 분석·검토·재시도'},
         {'name': '냉장고', 'description': '보유 재료 조회·교체'},
         {'name': '검색', 'description': '재료·의미 검색과 추천'},
@@ -453,6 +453,28 @@ def get_pantry():
     return {'pantry': STORE.pantry()}
 
 
+@app.delete('/api/recipes/{recipe_id}', tags=['레시피'], summary='레시피 한 건 영구 삭제', response_model=RecipeDeleted)
+def delete_recipe(recipe_id: uuid.UUID):
+    """UUID로 선택한 원본·검색 데이터를 삭제하고 완료 사전을 반환한다.
+
+    Args:
+        recipe_id: 경로에 지정한 레시피 UUID. 잘못된 형식은 422로 거부한다.
+    Returns:
+        삭제한 id 문자열과 ``deleted=True`` 사전.
+    Raises:
+        StarletteHTTPException: 레시피가 없으면 404.
+        RuntimeError: 검색 point 삭제 실패. 422 응답이며 원본은 유지한다.
+    Side Effects:
+        수집·재색인과 같은 단일 작업자에서 선택 레시피를 영구 삭제한다.
+        분석 작업 기록·체크포인트·냉장고는 변경하지 않는다.
+    """
+    id = str(recipe_id)
+    deleted = WORKER.submit(lambda: pipelines().delete_recipe(id)).result()
+    if not deleted:
+        raise StarletteHTTPException(404, '레시피가 없습니다.')
+    return {'id': id, 'deleted': True}
+
+
 @app.get('/api/jobs/{job_id}', tags=['분석'], summary='분석 작업 상태·결과 조회', response_model=JobOutput)
 def get_job(job_id: str):
     """작업 ID로 상태 사전을 조회한다. 없는 ID는 404 오류 JSON을 반환한다."""
@@ -537,28 +559,6 @@ def reindex(body: ReindexInput):
 def reindex_all(body: EmptyInput):
     """현재 백엔드·모델에 재색인이 필요한 원본만 처리하고 성공·실패 요약을 반환한다."""
     return WORKER.submit(lambda: pipelines().reindex_all()).result()
-
-
-@app.post('/api/import', tags=['레시피'], summary='과거 브라우저 레시피 이관', response_model=ImportOutput)
-def import_recipes(body: ImportInput):
-    """과거 입력을 원본에 멱등 저장하고 처리 건수·항목별 오류 목록을 반환한다."""
-    count = 0
-    errors = []
-    for old in body.recipes:
-        try:
-            recipe = normalize({
-                'title': old['title'], 'category': old.get('category', '요리'),
-                'time': old.get('time') or None,
-                'ingredients': [{'raw_name': item, 'name': item} for item in old['ingredients']],
-                'steps': old['steps'],
-            })
-            key = 'legacy:' + str(old['id'])
-            STORE.save(str(uuid.uuid5(uuid.NAMESPACE_URL, key)), key, old.get('source', ''),
-                       '', recipe, semantic(recipe, ''), 'legacy')
-            count += 1
-        except (ValueError, KeyError, TypeError) as error:
-            errors.append(str(error))
-    return {'imported': count, 'errors': errors}
 
 
 @app.get('/', include_in_schema=False)

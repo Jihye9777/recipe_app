@@ -52,23 +52,17 @@ class EmptyInput(BaseModel):
     """전체 재색인 요청 본문. 빈 JSON 객체 {}를 보낸다."""
 
 
-class ImportInput(BaseModel):
-    """과거 localStorage 레시피 이관. 잘못된 항목은 errors에 개별 보고한다."""
-
-    recipes: list[dict[str, Any]] = Field(default_factory=list, description='id, title, ingredients(문자열 목록), steps를 가진 과거 레시피 목록')
-
-
-class ImportOutput(BaseModel):
-    """이관 처리 건수와 실패 항목의 오류 목록."""
-
-    imported: int
-    errors: list[str]
-
-
 class RecipesOutput(BaseModel):
     """UI용 레시피 목록. 구조화 데이터·시맨틱·인덱스 상태를 포함한다."""
 
     recipes: list[dict[str, Any]]
+
+
+class RecipeDeleted(BaseModel):
+    """선택한 원본·검색 point 삭제 완료 응답. 다른 레시피는 변경하지 않는다."""
+
+    id: str
+    deleted: bool
 
 
 class SearchOutput(RecipesOutput):

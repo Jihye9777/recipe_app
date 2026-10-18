@@ -294,6 +294,28 @@ class Pipelines:
             self.index.backend,self.llm.embedding_model)
         row=self.store.get(s['row']['id'])
         return {'result':{'recipe':public(row),'index_error':error,'aiEnabled':True,'provider':self.llm.model}}
+    def delete_recipe(self,id):
+        """벡터 삭제를 확인한 다음 해당 SQLite 원본 한 건만 삭제한다.
+
+        Args:
+            id: 삭제할 레시피 UUID 문자열. 호출자는 수집·재색인과 직렬화한다.
+        Returns:
+            삭제하면 True, 원본이 이미 없으면 False.
+        Raises:
+            RuntimeError: 벡터 삭제 실패. 이 경우 SQLite 원본은 유지한다.
+            sqlite3.Error: 원본 삭제 실패. 원본을 보존하며 재색인할 수 있다.
+        Side Effects:
+            선택한 레시피와 검색 point를 영구 삭제한다. 냉장고·jobs·체크포인트는
+            그대로 남는다. 모델 호출은 하지 않는다.
+        """
+        if self.store.get(id) is None:
+            return False
+        try:
+            self.index.delete(id)
+        except Exception as error:
+            raise RuntimeError('검색 데이터 삭제에 실패해 레시피 원본은 유지했어요. 다시 시도해 주세요.') from error
+        return self.store.delete(id)
+
     def reindex(self,id):
         """SQLite 레시피 한 건을 다시 임베딩하고 Qdrant에 저장한다.
 

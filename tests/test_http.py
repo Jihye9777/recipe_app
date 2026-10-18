@@ -74,6 +74,36 @@ class HTTPTests(unittest.TestCase):
         for path in ['/server.py','/data/recipe.db','/data/checkpoints.db','/.runtime/audio.mp4','/../server.py','/%73erver.py']:
             self.assertEqual(self.request(path)[0],404,path)
 
+    def test_delete_recipe_contract_and_data_isolation(self):
+        """DELETE 경로의 정상·없는 UUID·잘못된 ID와 나머지 원본 보존을 검증한다."""
+        _,accepted=self.request('/api/analyze',{'text':TEXT+' 삭제 API 테스트.'})
+        id=self.job(accepted['job_id'])['result']['recipe']['id']
+        before=[row for row in self.server.STORE.all() if row['id']!=id]
+        pantry=self.server.STORE.pantry()
+        response=self.client.delete('/api/recipes/'+id)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json(),{'id':id,'deleted':True})
+        self.assertEqual(self.server.STORE.all(),before)
+        self.assertNotIn(id,self.index.rows)
+        self.assertEqual(self.server.STORE.pantry(),pantry)
+        self.assertEqual(self.client.delete('/api/recipes/'+id).status_code,404)
+        self.assertEqual(self.client.delete('/api/recipes/not-a-uuid').status_code,422)
+        schema=self.client.get('/openapi.json').json()
+        self.assertIn('delete',schema['paths']['/api/recipes/{recipe_id}'])
+
+    def test_delete_failure_keeps_recipe_available_for_retry(self):
+        """인덱스 삭제 오류는 오류 JSON으로 알리고 저장 원본을 보존한다."""
+        _,accepted=self.request('/api/analyze',{'text':TEXT+' 삭제 실패 테스트.'})
+        id=self.job(accepted['job_id'])['result']['recipe']['id']
+        self.index.fail=True
+        try:
+            response=self.client.delete('/api/recipes/'+id)
+            self.assertEqual(response.status_code,422,response.text)
+            self.assertIn('error',response.json())
+            self.assertIsNotNone(self.server.STORE.get(id))
+        finally:
+            self.index.fail=False
+
     def test_approved_logo_is_public_but_other_assets_are_private(self):
         """승인된 로고 PNG만 공개하며 임의의 asset 경로는 허용하지 않는다."""
         response = self.client.get('/assets/cook-diary-rabbit.png')
@@ -96,7 +126,7 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(code, 200)
         paths = schema['paths']
         for path in ['/api/analyze', '/api/search', '/api/review', '/api/retry',
-                     '/api/pantry', '/api/reindex', '/api/reindex-all', '/api/import']:
+                     '/api/pantry', '/api/reindex', '/api/reindex-all']:
             self.assertIn('requestBody', paths[path]['post'], path)
         analyze = paths['/api/analyze']['post']
         self.assertIn('202', analyze['responses'])
@@ -144,13 +174,13 @@ class HTTPTests(unittest.TestCase):
             get.return_value.json.return_value={'models':[{'name':'gemma4:latest'},{'name':'embeddinggemma:latest'}]}
             code,out=self.request('/api/health')
             self.assertEqual(code,200);self.assertTrue(out['ready'])
-    def test_legacy_import_is_idempotent(self):
-        """동일한 과거 브라우저 레시피를 반복 이관해도 한 건인지 검증한다."""
+    def test_legacy_import_is_unavailable_without_changing_saved_recipes(self):
+        """제거된 이관 요청은 거부하고 저장된 레시피를 변경하지 않는다."""
         old={'id':'old-test','title':'예전 레시피','ingredients':['감자'],'steps':['익혀요.'],'time':5}
-        self.assertEqual(self.request('/api/import',{'recipes':[old]})[0],200)
-        self.request('/api/import',{'recipes':[old]})
-        rows=self.server.STORE.all()
-        self.assertEqual(len([r for r in rows if r['source_key']=='legacy:old-test']),1)
+        before = self.server.STORE.all()
+        self.assertIn(self.request('/api/import',{'recipes':[old]})[0], (404, 405))
+        self.assertEqual(self.server.STORE.all(), before)
+        self.assertNotIn('/api/import', self.client.get('/openapi.json').json()['paths'])
 
     def test_review_rejects_invalid_edit_without_losing_pause(self):
         """잘못된 검토 수정은 거부하고 올바른 승인으로 재개되는지 검증한다."""

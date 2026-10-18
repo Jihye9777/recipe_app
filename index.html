@@ -9,7 +9,7 @@
   <meta property="og:description" content="오늘의 한 끼를, 한 페이지에." />
   <meta property="og:image" content="/assets/cook-diary-rabbit.png" />
   <title>쿡다이어리 — 나만의 요리 일기</title>
-  <link rel="stylesheet" href="styles.css?v=cook-diary-font-2" />
+  <link rel="stylesheet" href="styles.css?v=cook-diary-bulk-delete-1" />
 </head>
 <body>
   <a class="skip-link" href="#main-content">본문으로 건너뛰기</a>
@@ -51,7 +51,16 @@
           <div><span class="section-kicker">PAGES FROM MY KITCHEN</span><h2>차곡차곡 모은 레시피</h2></div>
           <span class="count-pill" id="recipe-count">레시피 확인 중</span>
         </div>
-        <button class="text-button" id="migrate" hidden>이 브라우저의 예전 레시피를 SQLite로 가져오기</button>
+        <div class="recipe-selection-toolbar" role="group" aria-label="레시피 선택 삭제">
+          <button class="text-button" id="toggle-selection" type="button" aria-pressed="false" disabled>선택 삭제</button>
+          <div class="selection-controls" id="selection-controls" hidden>
+            <button class="text-button" id="select-all-recipes" type="button">전체 선택</button>
+            <button class="text-button" id="clear-recipe-selection" type="button">선택 해제</button>
+            <span id="selection-count" role="status">0개 선택됨</span>
+            <button class="text-button danger-button" id="delete-selected" type="button" disabled>선택한 0개 삭제</button>
+          </div>
+        </div>
+        <p class="helper bulk-delete-message" id="bulk-delete-message" role="status"></p>
         <button class="text-button" id="reindex-all" hidden>저장된 레시피 검색 인덱스 복구</button>
         <div class="recipe-grid" id="recipe-grid" aria-live="polite"></div>
       </section>
@@ -122,6 +131,6 @@
     <footer class="journal-footer"><span>쿡다이어리 / COOK DIARY</span><span>오늘의 맛이 내일의 기록이 되도록.</span></footer>
   </div>
   <div class="toast" id="toast" role="status"></div>
-  <script src="app.js?v=cook-diary-1"></script>
+  <script src="app.js?v=cook-diary-bulk-delete-1"></script>
 </body>
 </html>

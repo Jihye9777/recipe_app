@@ -92,6 +92,8 @@ not sufficient as the only way to identify an input or selected state.
   regular weight, comfortable spacing. `assets/fonts/나눔손글씨 무궁화.ttf`
   is served by the app and registered as `CookDiaryHandwriting` with `font-display: swap`.
   Use it for the brand wordmark, hero, recipe titles, and short annotations.
+  Also use it for navigation, the home introduction, home primary action, and
+  pantry spotlight copy. Keep mobile navigation at 20px and short notes at 22px.
   Keep ingredient lists, cooking instructions, inputs, and metadata in their existing stacks.
 - **Body / UI:** A clean system sans-serif. Ingredients and instructions must
   remain easy to read while standing in a kitchen.

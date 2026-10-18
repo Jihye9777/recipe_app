@@ -11,11 +11,20 @@ async function waitFor(fn){for(let i=0;i<150;i++){if(fn())return;await new Promi
 async function main(){
   const dom=new JSDOM(fs.readFileSync(path.join(root,'index.html'),'utf8'),{url:'http://localhost:8000',runScripts:'outside-only'});
   const w=dom.window;w.scrollTo=()=>{};
+  const legacyRecipes=JSON.stringify([{id:'old',title:'예전 레시피',ingredients:['감자'],steps:['익혀요.']}]);
+  w.localStorage.setItem('hanip-recipes',legacyRecipes);
   let saved=[recipe],pantry=[],state='review',reviewSent=null;
+  let confirmDelete=false,failDelete=false;
+  const confirmations=[];
+  w.confirm=message=>{confirmations.push(message);return confirmDelete;};
   const seen=[];
   w.fetch=async(url,opts={})=>{
-    const body=opts.body?JSON.parse(opts.body):null;seen.push([url,body]);let out;
+    const body=opts.body?JSON.parse(opts.body):null;seen.push([url,body,opts.method]);let out;
     if(url==='/api/recipes')out={recipes:saved};
+    else if(url==='/api/recipes/fixture'&&opts.method==='DELETE'){
+      if(failDelete)return{ok:false,status:422,text:async()=>JSON.stringify({error:'삭제 실패: 원본 유지'})};
+      saved=saved.filter(r=>r.id!=='fixture');out={id:'fixture',deleted:true};
+    }
     else if(url==='/api/pantry'){if(body)pantry=body.pantry;out={pantry};}
     else if(url==='/api/status')out={running:true,modelInstalled:true,model:'fixture'};
     else if(url==='/api/health')out={sqlite:{ready:true},ollama:{ready:true},embedding:{ready:true},qdrant:{ready:true,needsReindex:1}};
@@ -31,6 +40,8 @@ async function main(){
   try{
     w.eval(fs.readFileSync(path.join(root,'app.js'),'utf8'));
     await waitFor(()=>w.document.querySelector('#recipe-grid .recipe-card'));
+    assert.equal(w.document.querySelector('#migrate'),null,'legacy recipes must not expose an import action');
+    assert.equal(w.localStorage.getItem('hanip-recipes'),legacyRecipes,'removing import must preserve browser data');
     for (const id of ['youtube-url','source-text','ingredient-input']) {
       const input=w.document.getElementById(id);
       assert.ok(input.labels?.length || input.getAttribute('aria-label'), `${id} needs an accessible name independent of placeholder`);
@@ -77,6 +88,29 @@ async function main(){
     assert.equal(w.localStorage.getItem('hanip-job-id'),null);
     assert.ok(w.document.querySelector('#service-health').textContent.includes('검색 DB: 준비됨'));
     assert.equal(w.document.querySelector('#reindex-all').hidden,false);
+    saved=[recipe,{...recipe,id:'other',title:'다른 레시피'}];
+    w.document.querySelector('.nav-link[data-view="home"]').click();
+    await waitFor(()=>w.document.querySelectorAll('#recipe-grid .recipe-card').length===2);
+    w.document.querySelector('#recipe-grid .recipe-card').click();
+    const deleteButton=w.document.querySelector('#delete-recipe');
+    assert.ok(deleteButton,'saved recipe detail must offer deletion');
+    deleteButton.click();
+    assert.ok(confirmations[0].includes(recipe.title),'confirmation must identify the recipe');
+    assert.equal(seen.filter(([, ,method])=>method==='DELETE').length,0,'cancel must send no delete');
+    assert.equal(saved.length,2);
+    confirmDelete=true;failDelete=true;deleteButton.click();
+    await waitFor(()=>!deleteButton.disabled);
+    assert.ok(w.document.querySelector('#toast').textContent.includes('삭제 실패'));
+    assert.equal(saved.length,2,'failure must preserve both recipes');
+    failDelete=false;const previousDeletes=seen.filter(([, ,method])=>method==='DELETE').length;
+    deleteButton.click();deleteButton.click();
+    assert.equal(deleteButton.disabled,true,'prevent duplicate requests while deleting');
+    assert.equal(seen.filter(([, ,method])=>method==='DELETE').length,previousDeletes+1);
+    await waitFor(()=>w.document.querySelector('#home-view').classList.contains('active'));
+    await waitFor(()=>w.document.querySelectorAll('#recipe-grid .recipe-card').length===1);
+    assert.equal(saved[0].id,'other');
+    assert.equal(w.document.querySelector('#analysis-area').textContent,'','deleted detail must not remain visible');
+    assert.deepEqual(pantry,['달걀']);
     saved=[];
     w.document.querySelector('.nav-link[data-view="home"]').click();
     await waitFor(()=>w.document.querySelector('#empty-import'));

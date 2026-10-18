@@ -181,6 +181,23 @@ class QdrantIndex:
             if row['semantic']['spice_level'] is not None: payload['spice_level'] = row['semantic']['spice_level']
             self.client.upsert(self.collection_name,
                 points=[PointStruct(id=row['id'],vector=vector,payload=payload)],wait=True)
+    def delete(self, id):
+        """해당 UUID의 검색 point만 삭제하고 완료를 기다린다.
+
+        Args:
+            id: 삭제할 레시피 UUID 문자열.
+        Returns:
+            없음. 컬렉션이나 point가 이미 없으면 아무것도 변경하지 않는다.
+        Raises:
+            qdrant_client의 예외: 검색 저장소 삭제에 실패했을 때.
+        Side Effects:
+            지정한 point만 영구 삭제한다. 임베딩 생성이나 컬렉션 생성은 없다.
+        """
+        from qdrant_client.models import PointIdsList
+        with self.lock:
+            if self.client.collection_exists(self.collection_name):
+                self.client.delete(self.collection_name, points_selector=PointIdsList(points=[id]), wait=True)
+
     def search(self, query, filters):
         """자연어 질의를 임베딩해 Qdrant에서 가까운 레시피를 찾는다.
 

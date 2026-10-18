@@ -96,6 +96,21 @@ class Store:
         """
         with self.connect() as db:
             return self.unpack(db.execute('SELECT * FROM recipes WHERE id=?', (id,)).fetchone())
+    def delete(self, id):
+        """UUID가 일치하는 레시피 원본 한 건을 영구 삭제한다.
+
+        Args:
+            id: 삭제할 ``recipes.id`` 문자열.
+        Returns:
+            삭제한 행이 있으면 True, 이미 없으면 False.
+        Raises:
+            sqlite3.Error: 쓰기 실패 시 트랜잭션을 롤백하고 전파한다.
+        Side Effects:
+            해당 recipes 행만 삭제한다. 냉장고·작업 기록은 변경하지 않는다.
+        """
+        with self.connect() as db:
+            return db.execute('DELETE FROM recipes WHERE id=?', (id,)).rowcount > 0
+
     def find(self, key):
         """중복 판별 키로 레시피 한 건을 조회한다.
 

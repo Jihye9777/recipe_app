@@ -56,6 +56,7 @@ Adapted from [Karpathy-inspired guidelines](https://github.com/multica-ai/andrej
 # JS/UI 변경: DOM 검사는 기존 .runtime/ui-test/node_modules/jsdom 필요
 .\.venv-graph\Lib\site-packages\nodejs_wheel\node.exe --check app.js
 .\.venv-graph\Lib\site-packages\nodejs_wheel\node.exe tests/test_ui.cjs
+.\.venv-graph\Lib\site-packages\nodejs_wheel\node.exe tests/test_bulk_delete.cjs
 # 실제 연동 변경: 준비된 서비스에서 관련 항목만 실행
 .\.venv-graph\Scripts\python.exe -X utf8 tests/live_check.py --qdrant
 .\.venv-graph\Scripts\python.exe -X utf8 tests/live_check.py --ollama
