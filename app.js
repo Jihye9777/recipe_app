@@ -108,10 +108,26 @@ async function deleteSelectedRecipes() {
     }
   }
 }
+function stepEvidence(details) {
+  if (!Array.isArray(details) || !details.length) return '';
+  const items = details.map(step => {
+    const ingredients = (step.ingredients || []).map(item => {
+      const values = [item.quantity, item.unit];
+      const known = values.filter(value => value !== null && value !== undefined && !['', 'none', 'null'].includes(String(value).trim().toLowerCase()));
+      return esc([item.name, ...known, ...(known.length < values.length ? ['(확인 어려움)'] : [])].join(' '));
+    }).join(' · ');
+    return `<li><p>재료: ${ingredients || '(확인 어려움)'}</p><p>기구: ${esc((step.tools || []).join(' · ') || '(확인 어려움)')} · 시간: ${esc(step.duration_text || (step.duration_seconds ? `${step.duration_seconds}초` : '(확인 어려움)'))}</p><blockquote>${esc(step.evidence)}</blockquote></li>`;
+  }).join('');
+  return `<details class="step-evidence"><summary>단계별 원문 근거</summary><ol>${items}</ol></details>`;
+}
 function showSavedRecipe(r) {
   showView('import');
   qs('#analysis-area').innerHTML=`<article class="analysis-result"><div class="result-top"><div><span class="section-kicker">SQLite에 저장됨 · 검색 인덱스: ${esc(r.index_status)}</span><h2>${esc(r.title)}</h2><p>${esc(r.category)} · ${r.time ? esc(r.time)+'분':'시간 미상'}</p></div><button class="save-button" id="back-to-recipes">내 요리 일기로</button></div><div class="result-columns"><div><h3>준비할 재료</h3><ul>${r.ingredients.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div><div><h3>조리 순서</h3><ol>${r.steps.map(x=>`<li>${esc(x)}</li>`).join('')}</ol></div></div><p class="helper">매운맛: ${r.semantic.spice_level ?? '알 수 없음'} (재료 기반 추정) · 알레르기 안전성은 검증되지 않았습니다.</p><button class="text-button" id="reindex">검색 인덱스 다시 만들기</button><p id="index-message" role="status"></p></article>`;
   qs('#back-to-recipes').onclick=()=>showView('home');
+  qs('#analysis-area .analysis-result').insertAdjacentHTML('beforeend', stepEvidence(r.step_details));
+  if (r.semantic.quality_issues?.length) {
+    qs('#analysis-area .analysis-result').insertAdjacentHTML('beforeend', `<p class="helper">사용자가 확인해 저장한 내용입니다. 원문 대조 검토 사유 ${esc(r.semantic.quality_issues.length)}개가 남아 있습니다.</p>`);
+  }
   qs('#analysis-area .analysis-result').dataset.recipeId=r.id;
   qs('#analysis-area .analysis-result').insertAdjacentHTML('beforeend','<button class="text-button danger-button" id="delete-recipe" type="button">레시피 삭제</button>');
   qs('#delete-recipe').onclick=async e=>{
@@ -136,7 +152,7 @@ function showSavedRecipe(r) {
     catch(error){toast(error.message);e.target.disabled=false;if(qs('#delete-recipe'))qs('#delete-recipe').disabled=false;}
   };
 }
-const stages={validate_url:'URL·중복 확인',extract_transcript:'자막 추출 / Whisper',preprocess:'자막 전처리',structure:'LLM 구조화·검증',normalize:'재료 정규화·품질 검사',repair:'LLM 재검토',review:'사용자 확인',persist:'SQLite 저장',embed:'임베딩 생성',index:'Qdrant Local 인덱싱'};
+const stages={validate_url:'URL·중복 확인',extract_transcript:'자막 추출 / Whisper',preprocess:'자막 전처리',extract_facts:'원문 재료·기구·시간 사실 추출',structure:'LLM 구조화·검증',normalize:'재료 정규화·품질 검사',repair:'LLM 재검토',review:'사용자 확인',persist:'SQLite 저장',embed:'임베딩 생성',index:'Qdrant Local 인덱싱'};
 function failure(error,id) {
   qs('#analysis-area').innerHTML=`<div class="analysis-result"><h2>처리를 완료하지 못했어요</h2><p>${esc(error.message)}</p><p class="helper">YouTube 수집이 막힌 경우 자막/레시피 텍스트를 직접 붙여 넣을 수 있어요.</p>${id?'<button class="text-button" id="retry-job">중단된 단계 재시도</button>':''}</div>`;
   if(id) qs('#retry-job').onclick=async()=>{try{await api('/api/retry',{job_id:id});pollJob(id);}catch(e){toast(e.message);}};
@@ -145,6 +161,7 @@ function showReview(job) {
   const review=job.result;
   qs('#analysis-area').innerHTML=`<div class="analysis-result"><h2>저장 전 확인이 필요해요</h2><ul>${review.issues.map(x=>`<li>${esc(x)}</li>`).join('')}</ul><details><summary>원문 확인</summary><p>${esc(review.transcript)}</p></details><label for="review-json">레시피 JSON을 확인·수정하세요 (수량을 모르면 null)</label><textarea id="review-json" rows="18"></textarea><button class="primary-button" id="approve">내용을 확인했어요 · 저장</button></div>`;
   qs('#review-json').value=JSON.stringify(review.recipe,null,2);
+  qs('#analysis-area .analysis-result').insertAdjacentHTML('beforeend', stepEvidence(review.source_facts?.steps || review.recipe?.step_details));
   qs('#approve').onclick=async e=>{
     try { const recipe=JSON.parse(qs('#review-json').value); e.target.disabled=true; await api('/api/review',{job_id:job.id,approved:true,recipe}); pollJob(job.id); }
     catch(error){toast(error.message);e.target.disabled=false;}

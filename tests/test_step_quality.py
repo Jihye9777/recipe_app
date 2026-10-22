@@ -122,3 +122,10 @@ class StepQualityTests(unittest.TestCase):
         """기구·시간 필드가 남아 있어도 원문 행위를 축약해 조건을 버리지 않는다."""
         r = copy.deepcopy(RECIPE); r['step_details'][1]['action'] = '달걀 1개를 물에 넣고'
         self.assertTrue(self.check(r))
+
+    def test_grounded_step_use_does_not_replace_a_known_total(self):
+        """단계 사용량은 원문과 같고 별도 전체량이 있으면 부분 표기만으로 실패하지 않는다."""
+        r = copy.deepcopy(RECIPE); f = copy.deepcopy(FACTS)
+        r['step_details'][0]['ingredients'][0]['amount_role'] = 'partial'
+        f['steps'][0]['ingredients'][0]['amount_role'] = 'partial'
+        self.assertEqual(self.check(r, f), [])

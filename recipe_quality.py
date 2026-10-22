@@ -79,8 +79,6 @@ def _check_item(item, raw):
         issues.append(f'{name}: 수량·단위가 해당 원문 근거와 다릅니다')
     if item['quantity'] is None and amounts:
         issues.append(f'{name}: 원문에 명시된 분량이 누락됐습니다')
-    if item.get('amount_role') == 'partial':
-        issues.append(f'{name}: 부분 사용량과 전체 분량 관계 확인 필요')
     return issues
 
 
@@ -119,6 +117,8 @@ def source_quality(facts, raw):
         issues.append('원문 재료·조리 사실을 충분히 확보하지 못했습니다')
     for item in facts['ingredients']:
         issues.extend(_check_item(item, raw))
+        if item.get('amount_role') == 'partial':
+            issues.append(f"{item['name']}: 부분 사용량과 전체 분량 관계 확인 필요")
     for step in facts['steps']:
         issues.extend(_check_step(step, raw))
     for name, number, unit in MENTION.findall(_fold(raw)):

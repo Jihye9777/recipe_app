@@ -89,3 +89,14 @@ class RecipePromptTests(unittest.TestCase):
             payload = post.call_args.args[1]
             self.assertEqual(json.loads(payload['prompt'].split('\n')[-1])['source_facts'], facts)
             self.assertEqual(payload['system'], '규칙')
+
+    def test_generation_requires_optional_fields_without_changing_legacy_models(self):
+        """생성에서는 미상 필드도 명시하게 하되 저장 모델의 과거 JSON 읽기는 유지한다."""
+        llm = Ollama()
+        with patch.object(Path, 'read_text', return_value='규칙'), \
+                patch.object(llm, 'post', return_value={'response': '{}'}) as post:
+            llm.recipe('식초 1.5스푼')
+            schema = post.call_args.args[1]['format']
+            self.assertIn('step_details', schema['required'])
+            self.assertIn('quantity', schema['$defs']['Ingredient']['required'])
+            self.assertIn('unit', schema['$defs']['StepIngredient']['required'])

@@ -6,6 +6,8 @@ const {JSDOM} = require('../.runtime/ui-test/node_modules/jsdom');
 const root=path.resolve(__dirname,'..');
 const recipe={id:'fixture',title:'<img src=x onerror=alert(1)> 달걀 요리',category:'요리',time:5,
   ingredients:['달걀 2 개'],steps:['프라이팬에서 익혀요.'],semantic:{spice_level:null},index_status:'failed'};
+recipe.step_details=[{ingredients:[{name:'식초',quantity:1.5,unit:'스푼'}],tools:['전자레인지'],
+  duration_seconds:90,duration_text:'1분 30초',evidence:'전자레인지에서 익혀요. <img src=x onerror=alert(1)>'}];
 const structured={title:'달걀 요리',ingredients:[{raw_name:'달걀',name:'달걀',quantity:2,unit:'개',evidence:'달걀 2개'}],steps:['익혀요.']};
 async function waitFor(fn){for(let i=0;i<150;i++){if(fn())return;await new Promise(r=>setTimeout(r,10));}throw new Error('DOM update timed out');}
 async function main(){
@@ -53,6 +55,10 @@ async function main(){
     w.document.querySelector('#recipe-grid .recipe-card').click();
     assert.ok(w.document.querySelector('#analysis-area').textContent.includes('SQLite에 저장됨'));
     assert.equal(w.document.querySelector('#analysis-area img'),null);
+    assert.ok(w.document.querySelector('#analysis-area details')?.textContent.includes('단계별 원문 근거'),'saved detail must expose source evidence');
+    assert.ok(w.document.querySelector('#analysis-area details').textContent.includes('전자레인지'));
+    assert.ok(w.document.querySelector('#analysis-area details').textContent.includes('1분 30초'));
+    assert.ok(w.document.querySelector('#analysis-area details').textContent.includes('식초 1.5 스푼'));
     w.document.querySelector('#reindex').click();
     await waitFor(()=>w.document.querySelector('#index-message').textContent==='검색 인덱스 저장 완료');
     w.document.querySelector('[data-view="pantry"]').click();
