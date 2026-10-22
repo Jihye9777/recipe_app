@@ -1,0 +1,4 @@
+ts	phase	decision	why	evidence	result
+2026-10-22T00:00:00+09:00	baseline	Committed current prompt and display improvements before implementation	User requested a recoverable starting commit	2e6e4c7	38 Python tests and both DOM suites passed
+2026-10-22T00:00:01+09:00	design	Selected immutable source facts and one pure quality owner	An omission cannot be detected from a final recipe alone	docs/superpowers/plans/2026-10-22-step-evidence-contract.md	Independent cross-judge agreed
+2026-10-22T00:00:02+09:00	capacity	Reduced design fanout and assigned isolated root implementation	Session thread limit rejected the second new agent	.audit/step-quality-20261022.todo.md	Independent non-author verification still required
