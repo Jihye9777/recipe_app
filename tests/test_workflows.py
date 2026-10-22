@@ -10,7 +10,9 @@ from storage import Store
 from workflows import Pipelines, valid_video
 
 TEXT = '계란 2개를 프라이팬에 익혀요.'
-RECIPE = {'title':'계란 요리','time':10,'ingredients':[{'raw_name':'계란','name':'계란','quantity':2,'unit':'개','evidence':TEXT}], 'steps':['계란을 익혀요.'],'tools':['프라이팬']}
+RECIPE = {'title':'계란 요리','time':10,'ingredients':[{'raw_name':'계란','name':'계란','quantity':2,'unit':'개','evidence':TEXT}], 'steps':[TEXT],'tools':['프라이팬']}
+RECIPE['step_details'] = [{'ingredients': copy.deepcopy(RECIPE['ingredients']), 'action': TEXT,
+    'tools': ['프라이팬'], 'duration_seconds': None, 'duration_text': None, 'evidence': TEXT, 'source_step': 0}]
 
 class FakeLLM:
     """호출 수와 실패를 제어할 수 있는 결정적 Ollama 테스트 대역."""
@@ -19,7 +21,10 @@ class FakeLLM:
     def __init__(self):
         """기본 응답, 호출 카운터와 임베딩 실패 스위치를 초기화한다."""
         self.calls=0; self.response=RECIPE; self.embed_fail=False
-    def recipe(self,text,feedback=''):
+    def source_facts(self,text):
+        """최종 후보와 별개인 고정 원문 사실을 반환한다."""
+        return {'ingredients':copy.deepcopy(RECIPE['ingredients']), 'steps':copy.deepcopy(RECIPE['step_details'])}
+    def recipe(self,text,feedback='', *, source_facts=None):
         """입력과 무관하게 복제한 고정 레시피를 반환하고 호출 수를 증가시킨다."""
         self.calls+=1
         return copy.deepcopy(self.response)

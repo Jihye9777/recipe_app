@@ -75,3 +75,17 @@ class RecipePromptTests(unittest.TestCase):
                 json.dumps(post.call_args.args[1]['format'])
         finally:
             os.chdir(original)
+
+    def test_source_extraction_and_recipe_keep_facts_separate_from_rules(self):
+        """독립 사실 추출과 최종 생성 모두 원문·사실을 시스템 규칙과 분리한다."""
+        llm = Ollama()
+        self.assertTrue(callable(getattr(llm, 'source_facts', None)))
+        facts = {'ingredients': [], 'steps': []}
+        with patch.object(Path, 'read_text', return_value='규칙'), \
+                patch.object(llm, 'post', return_value={'response': '{"ingredients":[],"steps":[]}'}) as post:
+            self.assertEqual(llm.source_facts('원문'), facts)
+            self.assertIn('steps', post.call_args.args[1]['format']['properties'])
+            llm.recipe('원문', source_facts=facts)
+            payload = post.call_args.args[1]
+            self.assertEqual(json.loads(payload['prompt'].split('\n')[-1])['source_facts'], facts)
+            self.assertEqual(payload['system'], '규칙')
