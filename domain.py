@@ -61,7 +61,7 @@ class Recipe(BaseModel):
         return [x.strip() for x in values]
 
 ALIASES = {'계란': '달걀', '고추가루': '고춧가루', '올리브오일': '올리브유'}
-UNITS = {'스푼': None, '큰술': '큰술', '작은술': '작은술', '그램': 'g', '킬로그램': 'kg', '밀리리터': 'ml'}
+UNITS = {'스푼': '스푼', '큰술': '큰술', '작은술': '작은술', '그램': 'g', '킬로그램': 'kg', '밀리리터': 'ml'}
 def canonical(value):
     """사용자·LLM이 입력한 재료명을 비교 가능한 표준 이름으로 바꾼다.
 
