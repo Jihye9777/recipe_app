@@ -1,6 +1,7 @@
 """Recipe schemas and conservative, versioned semantic enrichment."""
 import re
 import unicodedata
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class Ingredient(BaseModel):
@@ -22,6 +23,47 @@ class Ingredient(BaseModel):
     optional: bool = False
     evidence: str = ''
 
+    @field_validator('quantity', 'unit', mode='before')
+    @classmethod
+    def unknown_values(cls, value):
+        """선택 필드의 빈 값·None/null 문자열을 실제 null로 반환한다."""
+        if isinstance(value, str) and value.strip().lower() in {'', 'none', 'null'}:
+            return None
+        return value
+
+
+class StepIngredient(Ingredient):
+    """단계별 재료 사용량과 전체·부분·미상 관계를 보존한다."""
+
+    amount_role: Literal['total', 'partial', 'unknown'] = 'unknown'
+
+
+class CookingStep(BaseModel):
+    """입력 원문의 한 조리 행위와 재료·기구·시간·근거를 보존한다."""
+
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True, allow_inf_nan=False)
+    ingredients: list[StepIngredient] = Field(default_factory=list)
+    action: str = Field(min_length=1)
+    tools: list[str] = Field(default_factory=list)
+    duration_seconds: float | None = Field(default=None, gt=0)
+    duration_text: str | None = None
+    evidence: str = Field(min_length=1)
+    source_step: int | None = Field(default=None, ge=0)
+
+    @field_validator('duration_seconds', 'duration_text', mode='before')
+    @classmethod
+    def unknown_values(cls, value):
+        """선택 시간 필드의 명시적 미상 문자열을 실제 null로 반환한다."""
+        return Ingredient.unknown_values(value)
+
+
+class SourceFacts(BaseModel):
+    """최종 레시피와 독립적으로 확보해 체크포인트에 보존하는 원문 사실."""
+
+    model_config = ConfigDict(extra='forbid')
+    ingredients: list[StepIngredient] = Field(default_factory=list)
+    steps: list[CookingStep] = Field(default_factory=list)
+
 class Recipe(BaseModel):
     """LLM 출력과 SQLite 저장에 공통으로 사용하는 레시피 스키마.
 
@@ -33,6 +75,7 @@ class Recipe(BaseModel):
         ingredients: 하나 이상의 :class:`Ingredient` 목록.
         steps: 순서가 보존된 조리 단계 목록.
         tools: 원문에서 확인된 조리 도구 목록.
+        step_details: 새 추출의 단계별 근거. 과거 레시피는 빈 목록으로 읽는다.
     """
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
     title: str = Field(min_length=1)
@@ -42,6 +85,7 @@ class Recipe(BaseModel):
     ingredients: list[Ingredient] = Field(min_length=1)
     steps: list[str] = Field(min_length=1)
     tools: list[str] = Field(default_factory=list)
+    step_details: list[CookingStep] = Field(default_factory=list)
 
     @field_validator('steps', 'tools')
     @classmethod
@@ -93,14 +137,19 @@ def normalize(recipe):
     for item in data['ingredients']:
         item['name'] = canonical(item['name'])
         item['unit'] = UNITS.get(item['unit'], item['unit'])
+    for step in data['step_details']:
+        for item in step['ingredients']:
+            item['name'] = canonical(item['name'])
+            item['unit'] = UNITS.get(item['unit'], item['unit'])
     return data
 
-def quality(recipe, transcript):
+def quality(recipe, transcript, *, source_facts=None):
     """구조화된 재료가 실제 원문 근거와 일치하는지 보수적으로 검사한다.
 
     Args:
         recipe: :func:`normalize`를 통과한 레시피 사전.
         transcript: 자막 또는 사용자가 붙여 넣은 원문 문자열.
+        source_facts: 신규 자동 추출의 독립 원문 사실. 생략하면 기존 검사만 수행한다.
 
     Returns:
         발견된 문제를 설명하는 문자열 목록. 문제가 없으면 빈 목록이다.
@@ -114,7 +163,10 @@ def quality(recipe, transcript):
             issues.append(f"{item['name']}: 원문 재료명과 정규화된 이름 확인 필요")
         if item['quantity'] is not None and not item['unit']:
             issues.append(f"{item['name']}: 수량 단위 확인 필요")
-    return issues
+    if source_facts is not None:
+        from recipe_quality import inspect_recipe
+        issues.extend(inspect_recipe(recipe, transcript, source_facts))
+    return list(dict.fromkeys(issues))
 
 def semantic(recipe, transcript):
     """검색과 필터에 사용할 버전형 시맨틱 파생 정보를 생성한다.
