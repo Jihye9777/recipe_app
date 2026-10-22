@@ -1,12 +1,16 @@
-<<<<<<< HEAD
-# 한입노트 — 로컬 레시피 북
+# 쿡다이어리 — 나만의 요리 일기
 
 YouTube URL 또는 직접 붙여 넣은 텍스트를 레시피로 정리하고, 냉장고 재료로 검색·추천하는 개인용 로컬 웹 앱입니다.
+
+버터크림 종이와 따뜻한 테라코타 색상의 요리 일기장 UI를 사용합니다. 승인된 토끼 셰프 로고는 `assets/cook-diary-rabbit.png`, 디자인 기준은 `docs/design/recipe-journal.md`에 있습니다. 브랜드 변경 전 브라우저 저장 키는 기존 레시피와 진행 중인 작업을 보존하기 위해 그대로 유지합니다.
+
+제목·브랜드 글씨·짧은 메모에는 네이버의 나눔손글씨 무궁화(`assets/fonts/나눔손글씨 무궁화.ttf`)를 로컬 웹폰트로 사용합니다. 방문자의 PC 설치는 필요하지 않으며 본문·조리 순서는 기존 글꼴을 유지합니다. 배포할 때는 폰트의 저작권 안내와 라이선스 전문을 함께 보관하세요. [공식 글꼴 안내](https://clova.ai/handwriting/list.html).
 
 - **SQLite**: 유일한 원본 저장소
 - **Qdrant Local**: 원본에서 다시 만들 수 있는 벡터 검색 인덱스
 - **시맨틱 레이어**: 근거와 버전을 가진 파생 정보
 - **LangGraph**: 정해진 노드와 조건 분기로 두 파이프라인 실행
+- **FastAPI + Uvicorn**: 웹 화면·JSON API 제공 및 Swagger UI 자동 문서
 
 Qdrant는 Python 프로세스 안에서 Local mode로 실행하므로 **Docker, 별도 Qdrant 서버, BIOS 가상화가 필요하지 않습니다.**
 
@@ -59,6 +63,22 @@ EMBEDDING_MODEL=embeddinggemma
 
 또는 `start_graph.bat`을 더블클릭하고 [http://localhost:8000](http://localhost:8000)을 엽니다. Qdrant는 `data/qdrant/`에서 앱과 함께 실행되므로 별도 포트나 실행 명령이 없습니다.
 
+기존 명령은 그대로 사용합니다. `server.py`가 FastAPI 앱을 Uvicorn으로 실행하며
+`APP_HOST`, `APP_PORT` 설정을 적용합니다. 이전 서버가 실행 중이면 그 터미널에서
+Ctrl+C로 종료한 뒤 새 코드로 다시 실행하세요. Qdrant Local은 파일 잠금을 사용하므로
+단일 프로세스(worker 1)로 실행하고 reload·여러 서버의 중복 실행은 피합니다.
+
+서버가 실행되면 [API 문서 /docs](http://localhost:8000/docs)에서 API를 분류별로
+펼쳐 입력 필드·응답 형식을 확인하고 **Try it out → Execute**로 호출할 수 있습니다.
+[ReDoc /redoc](http://localhost:8000/redoc)은 읽기용 문서,
+[OpenAPI /openapi.json](http://localhost:8000/openapi.json)은 JSON 명세입니다.
+Swagger/ReDoc의 기본 UI 파일은 CDN에서 받으므로 문서 화면에는 인터넷 연결이 필요합니다.
+
+`POST /api/analyze`에 URL 또는 text를 보내면 `202`와 `job_id`가 반환됩니다.
+`GET /api/jobs/{job_id}`에서 `queued/running/review/complete/failed` 상태와 결과를 확인하세요.
+문서 화면의 분석·냉장고 저장·이관·재색인 호출은 실제 작업과 DB 변경을 수행합니다.
+입력 오류도 기존 화면이 처리하는 `error` 필드의 JSON을 반환합니다.
+
 ## 3. 파이프라인 1 — 수집·저장
 
 ```text
@@ -67,6 +87,7 @@ YouTube URL / 직접 입력 텍스트
  → youtube-transcript-api
     └ 실패 시 pytubefix 오디오 다운로드 → Local Whisper
  → 자막 전처리
+ → 원문 재료·단계 사실 추출·고정
  → Ollama 구조화 → Pydantic JSON Schema 검증
  → 재료명·단위 정규화 → 품질 검사
     └ 불확실하면 LLM 재검토 1회 또는 사용자 확인
@@ -75,6 +96,37 @@ YouTube URL / 직접 입력 텍스트
 ```
 
 실제 그래프는 `workflows.py`의 `Pipelines.ingest`입니다. yt-dlp는 사용하지 않습니다. 자막과 오디오 다운로드가 모두 차단되면 직접 텍스트 붙여넣기를 사용할 수 있습니다. 원문과 구조화 결과를 함께 저장하고, 모르는 수량이나 시간은 임의로 만들지 않고 `null`로 둡니다.
+
+### Gemma에 전달하는 추출 규칙
+
+규칙은 [`prompts/recipe.md`](prompts/recipe.md)에서 관리합니다. `AGENTS.md`나 `CONTEXT.md`를 Ollama가 자동으로 읽는 구조가 아닙니다. `integrations.py`의 `Ollama.recipe()`가 매 추출·재검토 요청마다 이 파일을 UTF-8로 읽어 `/api/generate`의 `system`에 전달합니다. 자막과 재검토 피드백은 별도의 입력 데이터로 보냅니다.
+
+주요 규칙은 근거 없는 재료 추가 금지, 모르는 수치의 `null` 처리, 분수·원문 단위 보존, 정확한 근거 인용, 불확실한 오타 교정 금지, 출처 간 수량 충돌의 임의 해소 금지입니다. 정규화 코드도 `스푼`을 삭제하거나 큰술로 환산하지 않고 보존합니다.
+
+규칙 파일 수정은 다음 요청부터 반영됩니다. 이 코드 변경을 처음 적용할 때는 서버를 한 번 재시작해야 합니다. 파일이 없거나 비어 있으면 규칙 없는 추출로 넘어가지 않고 작업을 실패 처리합니다. 배포·복사 시 `prompts/recipe.md`도 함께 포함하세요. 기존 저장 레시피는 자동 수정하지 않습니다.
+
+재료의 수량·단위가 null이거나 과거 데이터에 `None`·`null` 문자열로 남아 있으면 화면에는 `(확인 어려움)`을 한 번 표시합니다. 확인된 수량·단위는 그대로 유지하며, 저장 원본이나 `ingredient_details`를 수정하지 않습니다. `적당량` 또는 추정 단위를 임의로 붙이지 않습니다.
+
+프롬프트는 모델의 추측을 줄이기 위한 지시이며 정확도 보장은 아닙니다. 현재 실제 수집은 위 자막·Whisper·직접 입력 흐름입니다. 설명란·화면 수집과 여러 출처 사이의 충돌 판별은 아직 구현하지 않았습니다.
+
+### 단계별 근거와 저장 전 검사
+
+새 분석은 `Ollama.source_facts()`로 원문 사실을 먼저 확보한 뒤 `Ollama.recipe()`로 최종 레시피를 만듭니다. 사실은 재검토 중 바꾸지 않고 체크포인트에 보존합니다. 추가 모델 호출 때문에 이전보다 분석이 오래 걸릴 수 있습니다.
+
+기존 `steps` 문자열 목록은 유지합니다. 추가 `step_details`는 단계별 사용 재료·분량, 원문 동작, 기구, 시간 초 값, 원문 시간 표현, 인용문과 원문 단계 번호를 저장합니다. 새 자동 생성은 원문 동작을 그대로 보존하며, 검사를 통과한 구조 정보에서 표시 문장을 만듭니다. 상세 화면과 저장 전 검토 화면의 **단계별 원문 근거**에서 이를 확인할 수 있습니다.
+
+`recipe_quality.py`는 원문 인용과 명시적 재료 분량을 대조하고, 같은 단계의 기구·시간이 누락되거나 다른 단계로 옮겨졌는지 검사합니다. 정수·소수·단순 분수와 일부 유니코드 분수, 분·초 표현, 코드에 명시한 기구·단위 표현을 지원합니다. 스푼과 큰술은 임의 환산하지 않습니다. 부분 사용량이나 부정 지시처럼 관계가 모호하면 검토로 보냅니다. 임의의 한국어 문장 전체를 이해하거나 모든 누락을 검출한다고 보장하지 않습니다.
+
+원문 사실 추출 실패, 근거 없는 수량·기구·시간 추가, 남은 불일치는 재검토 한 번 뒤 `review` 상태로 남습니다. 과거 체크포인트가 이미 저장 단계에 있어도 새 검사 자료가 없으면 확인을 요구합니다. 사용자 수정·승인 문장은 그대로 저장하며 `semantic.review_status=user_confirmed`, `quality_version=step-evidence-v1`, 남은 `quality_issues`로 자동 검사 완료와 구별합니다.
+
+기존 레시피·원문·DB 열은 재작성하지 않습니다. 같은 URL을 다시 넣으면 여전히 기존 레시피를 반환합니다. **검색 인덱스 다시 만들기**는 재추출이 아닙니다. 이미 저장된 레시피에 새 결과를 적용하려면 별도 확인·이관 작업이 필요하며 이 변경은 자동 덮어쓰기를 하지 않습니다.
+
+격리된 실제 로컬 모델 평가는 다음 명령으로 실행합니다. 두 번째 명령은 원본 SQLite를 읽기 전용으로 열고 최대 세 건의 저장 원문을 평가합니다. 영상 재다운로드나 원본 레시피 갱신은 하지 않습니다. 결과·체크포인트·별도 DB는 `.runtime/step-quality-eval-*`에 남기며 자동 삭제하지 않습니다. 검토 대기는 정확도 검증 통과를 뜻하지 않습니다.
+
+```powershell
+.\.venv-graph\Scripts\python.exe -X utf8 -u tests/evaluate_step_quality.py
+.\.venv-graph\Scripts\python.exe -X utf8 -u tests/evaluate_step_quality.py --source-db data/recipe.db
+```
 
 분석 요청은 `202`와 `job_id`를 반환하며 `queued → running → review / complete / failed`로 진행됩니다. `data/checkpoints.db`에 중단·재개 상태를 보존합니다.
 
@@ -147,7 +199,9 @@ QDRANT_COLLECTION=RecipeV2
 
 | 경로 | 용도 |
 | --- | --- |
+| `GET /docs`, `GET /redoc`, `GET /openapi.json` | API 문서·OpenAPI 명세 |
 | `GET /api/recipes` | 레시피 목록·상세 |
+| `DELETE /api/recipes/<id>` | 선택한 UUID의 레시피·검색 point 영구 삭제 |
 | `GET/POST /api/pantry` | 냉장고 읽기·저장 |
 | `POST /api/analyze` | URL 또는 텍스트 분석 시작 |
 | `GET /api/jobs/<id>` | 작업 상태 조회 |
@@ -156,8 +210,39 @@ QDRANT_COLLECTION=RecipeV2
 | `POST /api/reindex` | 한 건 재색인 |
 | `POST /api/reindex-all` | 필요한 모든 레시피 재색인 |
 | `GET /api/health` | SQLite·Ollama·임베딩·Qdrant 상태 |
+| `GET /api/status` | Ollama 실행·모델 설치 상태 |
 
-`server.py`는 HTTP와 수집, `workflows.py`는 LangGraph, `domain.py`는 스키마·시맨틱 규칙, `storage.py`는 SQLite, `integrations.py`는 Ollama·Qdrant 연동을 담당합니다.
+### 레시피 한 건 삭제
+
+레시피를 열고 상세 화면 아래의 **레시피 삭제**를 누릅니다. 제목이 표시된 확인창에서
+확인해야 삭제 요청을 보내며, 취소하면 아무것도 변경하지 않습니다. 삭제 후에는 목록으로
+돌아가고 다른 레시피·냉장고 재료는 유지됩니다. 복구 기능은 없으므로 필요한 원본은 먼저 백업하세요.
+
+삭제는 수집·재색인과 같은 단일 작업자에서 실행합니다. 해당 Qdrant point를 먼저 제거한 다음
+SQLite의 recipes 행을 삭제합니다. 검색 저장소 삭제가 실패하면 원본을 유지하고 오류를 표시하므로
+연결을 복구한 뒤 다시 시도할 수 있습니다. 임베딩·LLM 호출은 필요하지 않습니다.
+삭제한 URL/텍스트는 새 분석으로 다시 저장할 수 있습니다.
+
+이 기능은 레시피 원본 행과 검색 point만 제거합니다. 분석 작업의 `jobs` 결과와 LangGraph
+체크포인트·브라우저의 과거 저장 데이터·백업까지 지우는 전체 개인정보 삭제 기능은 아닙니다.
+API를 직접 호출할 때는 DELETE 요청 자체가 삭제 의사 표시이며 UI 확인창은 거치지 않습니다.
+
+### 여러 레시피 선택 삭제
+
+홈 목록에서 **선택 삭제**를 누른 뒤 체크박스로 삭제할 레시피를 고릅니다.
+**전체 선택 / 선택 해제**를 사용할 수 있고, **선택한 N개 삭제**에서 개수·제목과
+복구 불가 안내를 확인한 경우에만 삭제합니다. **선택 취소**는 선택 모드만 종료하며 데이터를 지우지 않습니다.
+
+확정된 ID를 기존 개별 DELETE API로 순서대로 처리합니다. 처리 중 중복 요청·선택 변경은 막고,
+완료 후 성공한 항목만 목록에서 제거합니다. 실패한 항목은 선택을 유지하고 오류를 표시해 재시도할 수 있습니다.
+일부 실패 시 이미 성공한 삭제는 되돌리지 않습니다. 선택하지 않은 레시피·냉장고와 상세 화면의 개별 삭제는 유지됩니다.
+프론트엔드 동작은 기존 DOM 검사와 함께 `node tests/test_bulk_delete.cjs`로 검증합니다(프로젝트의 기존 node 실행 파일 사용).
+
+`server.py`는 FastAPI 라우트·서버 수명과 수집, `api_schemas.py`는 API 요청·응답 스키마,
+`workflows.py`는 LangGraph, `domain.py`는 도메인 스키마·시맨틱 규칙,
+`storage.py`는 SQLite, `integrations.py`는 Ollama·Qdrant 연동을 담당합니다.
+HTTP 테스트는 FastAPI TestClient와 임시 SQLite·가짜 AI 연동을 사용하고,
+수명 테스트는 임시 Qdrant Local의 파일 잠금 해제·동일 경로 재시작을 확인합니다.
 
 ## 8. 검증과 백업
 
@@ -178,6 +263,5 @@ QDRANT_COLLECTION=RecipeV2
 - [LangGraph 워크플로와 에이전트](https://docs.langchain.com/oss/python/langgraph/workflows-agents)
 - [LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
 - [Ollama 임베딩 API](https://docs.ollama.com/api/embed)
-=======
-# recipe_app
->>>>>>> origin/main
+- [FastAPI 자동 API 문서](https://fastapi.tiangolo.com/tutorial/first-steps/)
+- [FastAPI 서버 수명 관리](https://fastapi.tiangolo.com/advanced/events/)

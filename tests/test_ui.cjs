@@ -6,16 +6,27 @@ const {JSDOM} = require('../.runtime/ui-test/node_modules/jsdom');
 const root=path.resolve(__dirname,'..');
 const recipe={id:'fixture',title:'<img src=x onerror=alert(1)> 달걀 요리',category:'요리',time:5,
   ingredients:['달걀 2 개'],steps:['프라이팬에서 익혀요.'],semantic:{spice_level:null},index_status:'failed'};
+recipe.step_details=[{ingredients:[{name:'식초',quantity:1.5,unit:'스푼'}],tools:['전자레인지'],
+  duration_seconds:90,duration_text:'1분 30초',evidence:'전자레인지에서 익혀요. <img src=x onerror=alert(1)>'}];
 const structured={title:'달걀 요리',ingredients:[{raw_name:'달걀',name:'달걀',quantity:2,unit:'개',evidence:'달걀 2개'}],steps:['익혀요.']};
 async function waitFor(fn){for(let i=0;i<150;i++){if(fn())return;await new Promise(r=>setTimeout(r,10));}throw new Error('DOM update timed out');}
 async function main(){
   const dom=new JSDOM(fs.readFileSync(path.join(root,'index.html'),'utf8'),{url:'http://localhost:8000',runScripts:'outside-only'});
   const w=dom.window;w.scrollTo=()=>{};
+  const legacyRecipes=JSON.stringify([{id:'old',title:'예전 레시피',ingredients:['감자'],steps:['익혀요.']}]);
+  w.localStorage.setItem('hanip-recipes',legacyRecipes);
   let saved=[recipe],pantry=[],state='review',reviewSent=null;
+  let confirmDelete=false,failDelete=false;
+  const confirmations=[];
+  w.confirm=message=>{confirmations.push(message);return confirmDelete;};
   const seen=[];
   w.fetch=async(url,opts={})=>{
-    const body=opts.body?JSON.parse(opts.body):null;seen.push([url,body]);let out;
+    const body=opts.body?JSON.parse(opts.body):null;seen.push([url,body,opts.method]);let out;
     if(url==='/api/recipes')out={recipes:saved};
+    else if(url==='/api/recipes/fixture'&&opts.method==='DELETE'){
+      if(failDelete)return{ok:false,status:422,text:async()=>JSON.stringify({error:'삭제 실패: 원본 유지'})};
+      saved=saved.filter(r=>r.id!=='fixture');out={id:'fixture',deleted:true};
+    }
     else if(url==='/api/pantry'){if(body)pantry=body.pantry;out={pantry};}
     else if(url==='/api/status')out={running:true,modelInstalled:true,model:'fixture'};
     else if(url==='/api/health')out={sqlite:{ready:true},ollama:{ready:true},embedding:{ready:true},qdrant:{ready:true,needsReindex:1}};
@@ -31,15 +42,35 @@ async function main(){
   try{
     w.eval(fs.readFileSync(path.join(root,'app.js'),'utf8'));
     await waitFor(()=>w.document.querySelector('#recipe-grid .recipe-card'));
+    assert.equal(w.document.querySelector('#migrate'),null,'legacy recipes must not expose an import action');
+    assert.equal(w.localStorage.getItem('hanip-recipes'),legacyRecipes,'removing import must preserve browser data');
+    for (const id of ['youtube-url','source-text','ingredient-input']) {
+      const input=w.document.getElementById(id);
+      assert.ok(input.labels?.length || input.getAttribute('aria-label'), `${id} needs an accessible name independent of placeholder`);
+    }
+    const skip=w.document.querySelector('.skip-link');
+    assert.ok(skip && w.document.querySelector(skip.getAttribute('href')), 'skip link must reach the main content');
+    assert.equal(w.document.querySelector('.nav-link[data-view="home"]').getAttribute('aria-current'),'page');
     assert.equal(w.document.querySelector('#recipe-grid img'),null,'recipe title must be escaped');
     w.document.querySelector('#recipe-grid .recipe-card').click();
     assert.ok(w.document.querySelector('#analysis-area').textContent.includes('SQLite에 저장됨'));
     assert.equal(w.document.querySelector('#analysis-area img'),null);
+    assert.ok(w.document.querySelector('#analysis-area details')?.textContent.includes('단계별 원문 근거'),'saved detail must expose source evidence');
+    assert.ok(w.document.querySelector('#analysis-area details').textContent.includes('전자레인지'));
+    assert.ok(w.document.querySelector('#analysis-area details').textContent.includes('1분 30초'));
+    assert.ok(w.document.querySelector('#analysis-area details').textContent.includes('식초 1.5 스푼'));
     w.document.querySelector('#reindex').click();
     await waitFor(()=>w.document.querySelector('#index-message').textContent==='검색 인덱스 저장 완료');
     w.document.querySelector('[data-view="pantry"]').click();
+    assert.equal(w.document.querySelector('.nav-link[data-view="pantry"]').getAttribute('aria-current'),'page');
+    assert.equal(w.document.querySelector('.nav-link[data-view="home"]').hasAttribute('aria-current'),false);
     await waitFor(()=>w.document.querySelector('[data-result]'));
     assert.ok(w.document.querySelector('#recommendations').textContent.includes('수량 확인 필요'));
+    const recommendation=w.document.querySelector('[data-result]');
+    recommendation.dispatchEvent(new w.KeyboardEvent('keydown',{key:' ',bubbles:true,cancelable:true}));
+    assert.equal(w.document.querySelector('#import-view').classList.contains('active'),true,'Space must open a recommendation with button semantics');
+    w.document.querySelector('[data-view="pantry"]').click();
+    await waitFor(()=>w.document.querySelector('[data-result]'));
     w.document.querySelector('#ingredient-input').value='달걀';
     w.document.querySelector('#ingredient-form').dispatchEvent(new w.Event('submit',{cancelable:true}));
     await waitFor(()=>pantry.includes('달걀'));
@@ -47,6 +78,10 @@ async function main(){
     w.document.querySelector('#search-form').dispatchEvent(new w.Event('submit',{cancelable:true}));
     await waitFor(()=>seen.some(([url,b])=>url==='/api/search'&&b.max_missing===0));
     w.document.querySelector('[data-view="import"]').click();
+    w.document.querySelector('#youtube-url').value='https://www.youtube.com/watch?v=UUOpe_sTKzA';
+    w.document.querySelector('#url-form').dispatchEvent(new w.Event('submit',{cancelable:true}));
+    await waitFor(()=>w.document.querySelector('#approve'));
+    assert.ok(seen.some(([url,b])=>url==='/api/analyze'&&b.url==='https://www.youtube.com/watch?v=UUOpe_sTKzA'&&b.text===''),'URL form must preserve the analysis request contract');
     w.document.querySelector('#source-text').value='달걀 2개';
     w.document.querySelector('#text-form').dispatchEvent(new w.Event('submit',{cancelable:true}));
     await waitFor(()=>w.document.querySelector('#approve'));
@@ -59,7 +94,35 @@ async function main(){
     assert.equal(w.localStorage.getItem('hanip-job-id'),null);
     assert.ok(w.document.querySelector('#service-health').textContent.includes('검색 DB: 준비됨'));
     assert.equal(w.document.querySelector('#reindex-all').hidden,false);
-    console.log('PASS: SQL detail, HTML escaping, reindex, pantry, search filters, review validation/resume, saved-with-index-failure, health status');
+    saved=[recipe,{...recipe,id:'other',title:'다른 레시피'}];
+    w.document.querySelector('.nav-link[data-view="home"]').click();
+    await waitFor(()=>w.document.querySelectorAll('#recipe-grid .recipe-card').length===2);
+    w.document.querySelector('#recipe-grid .recipe-card').click();
+    const deleteButton=w.document.querySelector('#delete-recipe');
+    assert.ok(deleteButton,'saved recipe detail must offer deletion');
+    deleteButton.click();
+    assert.ok(confirmations[0].includes(recipe.title),'confirmation must identify the recipe');
+    assert.equal(seen.filter(([, ,method])=>method==='DELETE').length,0,'cancel must send no delete');
+    assert.equal(saved.length,2);
+    confirmDelete=true;failDelete=true;deleteButton.click();
+    await waitFor(()=>!deleteButton.disabled);
+    assert.ok(w.document.querySelector('#toast').textContent.includes('삭제 실패'));
+    assert.equal(saved.length,2,'failure must preserve both recipes');
+    failDelete=false;const previousDeletes=seen.filter(([, ,method])=>method==='DELETE').length;
+    deleteButton.click();deleteButton.click();
+    assert.equal(deleteButton.disabled,true,'prevent duplicate requests while deleting');
+    assert.equal(seen.filter(([, ,method])=>method==='DELETE').length,previousDeletes+1);
+    await waitFor(()=>w.document.querySelector('#home-view').classList.contains('active'));
+    await waitFor(()=>w.document.querySelectorAll('#recipe-grid .recipe-card').length===1);
+    assert.equal(saved[0].id,'other');
+    assert.equal(w.document.querySelector('#analysis-area').textContent,'','deleted detail must not remain visible');
+    assert.deepEqual(pantry,['달걀']);
+    saved=[];
+    w.document.querySelector('.nav-link[data-view="home"]').click();
+    await waitFor(()=>w.document.querySelector('#empty-import'));
+    w.document.querySelector('#empty-import').click();
+    assert.equal(w.document.querySelector('#import-view').classList.contains('active'),true,'empty recipe book action must open the existing import view');
+    console.log('PASS: accessible labels, skip link, current navigation, keyboard recommendation, SQL detail, HTML escaping, reindex, pantry, search filters, review validation/resume, saved-with-index-failure, health status');
   }finally{w.close();}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

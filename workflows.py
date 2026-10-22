@@ -1,5 +1,7 @@
 """Two deterministic LangGraph workflows with durable ingestion checkpoints."""
 import hashlib
+import json
+import copy
 import re
 import sqlite3
 import uuid
@@ -8,7 +10,8 @@ from urllib.parse import urlparse, parse_qs
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Command
 from langgraph.checkpoint.sqlite import SqliteSaver
-from domain import Recipe, SearchInput, normalize, canonical, quality, semantic
+from domain import Recipe, SourceFacts, SearchInput, normalize, canonical, quality, semantic
+from recipe_quality import QUALITY_VERSION, source_quality, render_steps
 from storage import public
 
 class State(TypedDict, total=False):
@@ -37,6 +40,10 @@ class State(TypedDict, total=False):
     ranked: list[dict]
     warnings: list[str]
     user_reviewed: bool
+    source_facts: dict
+    source_issues: list[str]
+    quality_version: str
+    approved_recipe_hash: str
 
 def valid_video(url):
     """허용된 YouTube URL을 검증하고 11자리 영상 ID를 추출한다.
@@ -82,14 +89,15 @@ class Pipelines:
         self.checkpointer = SqliteSaver(self.checkpoint_db)
         g = StateGraph(State)
         nodes = {'validate_url':self.validate, 'extract_transcript':self.collect,
-            'preprocess':self.preprocess,'structure':self.structure,'normalize':self.normal,
+            'preprocess':self.preprocess,'extract_facts':self.collect_facts,'structure':self.structure,'normalize':self.normal,
             'repair':self.repair,'review':self.review,'persist':self.persist,
             'embed':self.embed,'index':self.index_row}
         for name, fn in nodes.items():
             g.add_node(name,self.tracked(name,fn))
         g.add_edge(START,'validate_url')
         g.add_conditional_edges('validate_url',lambda s: END if s.get('row') else 'extract_transcript')
-        g.add_edge('extract_transcript','preprocess'); g.add_edge('preprocess','structure')
+        g.add_edge('extract_transcript','preprocess'); g.add_edge('preprocess','extract_facts')
+        g.add_edge('extract_facts','structure')
         g.add_edge('structure','normalize')
         g.add_conditional_edges('normalize',lambda s:'repair' if s['issues'] else 'persist')
         g.add_edge('repair','review'); g.add_edge('review','persist')
@@ -189,10 +197,36 @@ class Pipelines:
             전파된다.
         """
         try:
-            r=Recipe.model_validate(self.llm.recipe(s['transcript'])).model_dump()
+            r=Recipe.model_validate(self.llm.recipe(s['raw_transcript'], source_facts=copy.deepcopy(s.get('source_facts', {})))).model_dump()
             return {'recipe':r,'issues':[]}
         except ValueError as error:
             return {'recipe':{},'issues':['JSON 구조 검증 실패: '+str(error)[:1000]]}
+    def collect_facts(self, s):
+        """raw_transcript에서 사실을 한 번 추출해 고정 JSON 상태와 문제 목록을 반환한다."""
+        try:
+            facts = SourceFacts.model_validate(self.llm.source_facts(s['raw_transcript']))
+            for index, step in enumerate(facts.steps):
+                step.source_step = index
+            issues = source_quality(facts, s['raw_transcript'])
+            return {'source_facts': facts.model_dump(), 'source_issues': issues,
+                    'quality_version': QUALITY_VERSION}
+        except Exception as error:
+            return {'source_facts': {}, 'source_issues': ['원문 사실 추출을 확인하지 못했습니다: ' + type(error).__name__],
+                    'quality_version': QUALITY_VERSION}
+
+    def candidate_issues(self, s, recipe):
+        """원문·고정 사실·후보를 대조한 검토 사유를 반환한다. 저장하지 않는다."""
+        issues = list(s.get('source_issues', []))
+        if s.get('quality_version') != QUALITY_VERSION or not s.get('source_facts'):
+            return issues + ['원문 사실·검사 버전이 없어 저장 전 확인이 필요합니다']
+        facts = SourceFacts.model_validate(s['source_facts'])
+        return list(dict.fromkeys(issues + quality(recipe, s.get('raw_transcript', s.get('transcript', '')), source_facts=facts)))
+
+    @staticmethod
+    def recipe_hash(recipe):
+        """승인 대상 후보를 식별할 정규 JSON 해시를 반환한다. 외부 I/O는 없다."""
+        return hashlib.sha256(json.dumps(recipe, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
     def normal(self,s):
         """재료명·단위를 정규화하고 원문 근거 품질을 검사한다.
 
@@ -205,7 +239,9 @@ class Pipelines:
         """
         if not s['recipe']: return {'issues':s['issues']}
         r=normalize(s['recipe'])
-        return {'recipe':r,'issues':quality(r,s['transcript'])}
+        issues = self.candidate_issues(s, r)
+        if not issues: r['steps'] = render_steps(r['step_details'])
+        return {'recipe':r,'issues':issues, 'user_reviewed': False, 'approved_recipe_hash': ''}
     def repair(self,s):
         """품질 문제를 피드백으로 전달해 LLM 재구조화를 한 번 시도한다.
 
@@ -217,8 +253,10 @@ class Pipelines:
             issues에 최대 300자의 재검토 오류를 추가한다.
         """
         try:
-            r=normalize(self.llm.recipe(s['transcript'],'; '.join(s['issues'])))
-            return {'recipe':r,'issues':quality(r,s['transcript'])}
+            r=normalize(self.llm.recipe(s['raw_transcript'],'; '.join(s['issues']), source_facts=copy.deepcopy(s.get('source_facts', {}))))
+            issues = self.candidate_issues(s, r)
+            if not issues: r['steps'] = render_steps(r['step_details'])
+            return {'recipe':r,'issues':issues, 'user_reviewed': False, 'approved_recipe_hash': ''}
         except Exception as error:
             return {'issues':s['issues']+['재검토 실패: '+str(error)[:300]]}
     def review(self,s):
@@ -239,10 +277,11 @@ class Pipelines:
             확인이 필요하면 ``interrupt``를 호출해 체크포인트에 상태를 남긴다.
         """
         if not s['issues']: return {}
-        answer=interrupt({'recipe':s['recipe'],'issues':s['issues'],'transcript':s['transcript']})
+        answer=interrupt({'recipe':s['recipe'],'issues':s['issues'],'transcript':s.get('raw_transcript', s['transcript']),
+                          'source_facts':s.get('source_facts', {}), 'quality_version':s.get('quality_version')})
         if not answer.get('approved'): raise ValueError('저장이 취소되었습니다.')
         r=normalize(answer.get('recipe') or s['recipe'])
-        return {'recipe':r,'issues':[], 'user_reviewed':True}
+        return {'recipe':r,'issues':[], 'user_reviewed':True, 'approved_recipe_hash': self.recipe_hash(r)}
     def persist(self,s):
         """시맨틱 파생 정보를 만들고 SQLite 원본 레시피를 저장한다.
 
@@ -255,11 +294,25 @@ class Pipelines:
         Side Effects:
             ``recipes`` 테이블에 pending 인덱스 상태로 행을 삽입할 수 있다.
         """
-        sem=semantic(s['recipe'],s['transcript'])
-        sem['review_status']='user_confirmed' if s.get('user_reviewed') else 'automated_checks_passed'
-        row=self.store.save(str(uuid.uuid5(uuid.NAMESPACE_URL,s['key'])),s['key'],s.get('url',''),s['raw_transcript'],
-            s['recipe'],sem,self.llm.model)
-        return {'row':row}
+        r = normalize(s['recipe'])
+        confirmed = bool(s.get('user_reviewed') and s.get('approved_recipe_hash') == self.recipe_hash(r))
+        issues = self.candidate_issues(s, r)
+        if not confirmed and (issues or s.get('user_reviewed')):
+            if s.get('user_reviewed'): issues.append('승인한 후보와 현재 저장 후보가 달라 다시 확인해야 합니다')
+            answer = interrupt({'recipe':r,'issues':issues,'transcript':s.get('raw_transcript', s.get('transcript','')),
+                                'source_facts':s.get('source_facts',{}), 'quality_version':s.get('quality_version')})
+            if not answer.get('approved'): raise ValueError('저장이 취소되었습니다.')
+            r = normalize(answer.get('recipe') or r)
+            confirmed = True
+        if not confirmed: r['steps'] = render_steps(r['step_details'])
+        sem=semantic(r,s.get('raw_transcript',s.get('transcript','')))
+        sem['review_status']='user_confirmed' if confirmed else 'automated_checks_passed'
+        sem['quality_version'] = QUALITY_VERSION
+        sem['quality_issues'] = self.candidate_issues(s, r) if confirmed else []
+        row=self.store.save(str(uuid.uuid5(uuid.NAMESPACE_URL,s['key'])),s['key'],s.get('url',''),s.get('raw_transcript',s.get('transcript','')),
+            r,sem,self.llm.model)
+        return {'row':row,'recipe':r,'user_reviewed':confirmed,
+                'approved_recipe_hash':self.recipe_hash(r) if confirmed else ''}
     def embed(self,s):
         """레시피 검색 문자열의 임베딩을 생성하되 실패를 원본 손실로 만들지 않는다.
 
@@ -294,6 +347,28 @@ class Pipelines:
             self.index.backend,self.llm.embedding_model)
         row=self.store.get(s['row']['id'])
         return {'result':{'recipe':public(row),'index_error':error,'aiEnabled':True,'provider':self.llm.model}}
+    def delete_recipe(self,id):
+        """벡터 삭제를 확인한 다음 해당 SQLite 원본 한 건만 삭제한다.
+
+        Args:
+            id: 삭제할 레시피 UUID 문자열. 호출자는 수집·재색인과 직렬화한다.
+        Returns:
+            삭제하면 True, 원본이 이미 없으면 False.
+        Raises:
+            RuntimeError: 벡터 삭제 실패. 이 경우 SQLite 원본은 유지한다.
+            sqlite3.Error: 원본 삭제 실패. 원본을 보존하며 재색인할 수 있다.
+        Side Effects:
+            선택한 레시피와 검색 point를 영구 삭제한다. 냉장고·jobs·체크포인트는
+            그대로 남는다. 모델 호출은 하지 않는다.
+        """
+        if self.store.get(id) is None:
+            return False
+        try:
+            self.index.delete(id)
+        except Exception as error:
+            raise RuntimeError('검색 데이터 삭제에 실패해 레시피 원본은 유지했어요. 다시 시도해 주세요.') from error
+        return self.store.delete(id)
+
     def reindex(self,id):
         """SQLite 레시피 한 건을 다시 임베딩하고 Qdrant에 저장한다.
 

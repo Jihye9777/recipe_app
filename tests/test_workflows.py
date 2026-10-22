@@ -10,7 +10,9 @@ from storage import Store
 from workflows import Pipelines, valid_video
 
 TEXT = '계란 2개를 프라이팬에 익혀요.'
-RECIPE = {'title':'계란 요리','time':10,'ingredients':[{'raw_name':'계란','name':'계란','quantity':2,'unit':'개','evidence':TEXT}], 'steps':['계란을 익혀요.'],'tools':['프라이팬']}
+RECIPE = {'title':'계란 요리','time':10,'ingredients':[{'raw_name':'계란','name':'계란','quantity':2,'unit':'개','evidence':TEXT}], 'steps':[TEXT],'tools':['프라이팬']}
+RECIPE['step_details'] = [{'ingredients': copy.deepcopy(RECIPE['ingredients']), 'action': TEXT,
+    'tools': ['프라이팬'], 'duration_seconds': None, 'duration_text': None, 'evidence': TEXT, 'source_step': 0}]
 
 class FakeLLM:
     """호출 수와 실패를 제어할 수 있는 결정적 Ollama 테스트 대역."""
@@ -19,7 +21,10 @@ class FakeLLM:
     def __init__(self):
         """기본 응답, 호출 카운터와 임베딩 실패 스위치를 초기화한다."""
         self.calls=0; self.response=RECIPE; self.embed_fail=False
-    def recipe(self,text,feedback=''):
+    def source_facts(self,text):
+        """최종 후보와 별개인 고정 원문 사실을 반환한다."""
+        return {'ingredients':copy.deepcopy(RECIPE['ingredients']), 'steps':copy.deepcopy(RECIPE['step_details'])}
+    def recipe(self,text,feedback='', *, source_facts=None):
         """입력과 무관하게 복제한 고정 레시피를 반환하고 호출 수를 증가시킨다."""
         self.calls+=1
         return copy.deepcopy(self.response)
@@ -42,6 +47,10 @@ class FakeIndex:
         """행을 ID 기준으로 저장하거나 설정에 따라 실패한다."""
         if self.fail: raise RuntimeError('index unavailable')
         self.rows[row['id']]=row
+    def delete(self,id):
+        """해당 point만 제거하며 실패 스위치가 켜지면 원본을 유지한다."""
+        if self.fail: raise RuntimeError('index unavailable')
+        self.rows.pop(id,None)
     def search(self,query,filters):
         """저장된 모든 ID를 반환하거나 설정에 따라 실패한다."""
         if self.fail: raise RuntimeError('index unavailable')
@@ -142,6 +151,47 @@ class WorkflowTests(unittest.TestCase):
         self.llm.embed_fail=True
         job=self.ingest();self.assertEqual(job['status'],'complete',job)
         self.assertEqual(job['result']['recipe']['index_status'],'failed')
+
+    def test_delete_removes_only_selected_recipe_and_allows_reimport(self):
+        """한 건의 원본·벡터만 삭제하며 재수집·중복 삭제·냉장고 보존을 검증한다."""
+        first=self.ingest()['result']['recipe']['id']
+        other=self.ingest(text=TEXT+' 다른 레시피.')['result']['recipe']['id']
+        self.store.pantry(['달걀'])
+        self.assertTrue(self.graph.delete_recipe(first))
+        self.assertIsNone(self.store.get(first))
+        self.assertNotIn(first,self.index.rows)
+        self.assertEqual([r['id'] for r in self.search()['recipes']],[other])
+        self.assertEqual(self.store.pantry(),['달걀'])
+        self.assertFalse(self.graph.delete_recipe(first))
+        self.assertEqual(self.ingest()['status'],'complete')
+        self.assertIsNotNone(self.store.get(first))
+
+    def test_delete_index_failure_preserves_sql_and_other_recipes(self):
+        """벡터 삭제 실패 시 원본을 유지하고 재시도할 수 있어야 한다."""
+        id=self.ingest()['result']['recipe']['id']
+        before=self.store.all(); self.index.fail=True
+        with self.assertRaisesRegex(RuntimeError,'삭제'):
+            self.graph.delete_recipe(id)
+        self.assertEqual(self.store.all(),before)
+        self.index.fail=False
+        self.assertTrue(self.graph.delete_recipe(id))
+
+    def test_real_qdrant_delete_is_scoped_and_needs_no_embedding(self):
+        """실제 로컬 Qdrant에서 빈 컬렉션·한 건 삭제·반복 삭제를 검증한다."""
+        from integrations import QdrantIndex
+        index=QdrantIndex(self.llm,self.root/'delete-qdrant')
+        try:
+            id=self.ingest()['result']['recipe']['id']; row=self.store.get(id)
+            other={**row,'id':str(uuid.uuid4())}
+            index.delete(id)
+            index.upsert(row,[0.1,0.2,0.3]); index.upsert(other,[0.1,0.2,0.3])
+            self.llm.embed_fail=True
+            index.delete(id); index.delete(id)
+            self.assertEqual(index.client.retrieve(index.collection_name,[id]),[])
+            self.assertEqual(len(index.client.retrieve(index.collection_name,[other['id']])),1)
+            self.assertEqual(index.health()['vectors'],1)
+        finally:
+            index.close()
 
     def test_recommendation_filters_and_fallback(self):
         """SQLite 폴백 추천과 모든 하드 필터 및 팁 생성을 검증한다."""

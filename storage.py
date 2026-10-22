@@ -96,6 +96,21 @@ class Store:
         """
         with self.connect() as db:
             return self.unpack(db.execute('SELECT * FROM recipes WHERE id=?', (id,)).fetchone())
+    def delete(self, id):
+        """UUID가 일치하는 레시피 원본 한 건을 영구 삭제한다.
+
+        Args:
+            id: 삭제할 ``recipes.id`` 문자열.
+        Returns:
+            삭제한 행이 있으면 True, 이미 없으면 False.
+        Raises:
+            sqlite3.Error: 쓰기 실패 시 트랜잭션을 롤백하고 전파한다.
+        Side Effects:
+            해당 recipes 행만 삭제한다. 냉장고·작업 기록은 변경하지 않는다.
+        """
+        with self.connect() as db:
+            return db.execute('DELETE FROM recipes WHERE id=?', (id,)).rowcount > 0
+
     def find(self, key):
         """중복 판별 키로 레시피 한 건을 조회한다.
 
@@ -208,6 +223,25 @@ class Store:
             result['payload'] = json.loads(result['payload']) if result['payload'] else None
             return result
 
+def ingredient_display(item):
+    """미상 수량·단위를 사용자용 문구로 표시하고 입력은 변경하지 않는다.
+
+    Args:
+        item: name, quantity, unit을 가진 저장 재료 사전. 과거 데이터의
+            None/null 문자열과 실제 null, 빈 문자열도 미상으로 취급한다.
+    Returns:
+        확인된 이름·수량·단위와 필요한 경우 한 번의 ``(확인 어려움)``을
+        합친 문자열. 미상 값을 적당량이나 추정 단위로 대체하지 않는다.
+    """
+    values = [item['quantity'], item['unit']]
+    known = [value for value in values if value is not None
+             and str(value).strip().lower() not in {'', 'none', 'null'}]
+    parts = [item['name'], *[str(value).strip() for value in known]]
+    if len(known) != len(values):
+        parts.append('(확인 어려움)')
+    return ' '.join(parts)
+
+
 def public(row):
     """내부 SQLite 행을 브라우저에 반환할 공개 레시피 형식으로 변환한다.
 
@@ -221,7 +255,7 @@ def public(row):
     r = row['recipe']
     return {**r, 'id': row['id'], 'source': row['source_url'],
             'ingredient_details': r['ingredients'],
-            'ingredients': [' '.join(str(v) for v in (x['name'],x['quantity'],x['unit']) if v is not None) for x in r['ingredients']],
+            'ingredients': [ingredient_display(x) for x in r['ingredients']],
             'semantic': row['semantic'], 'index_status': row['index_status'],
             'index_backend': row.get('index_backend'), 'embedding_model': row.get('embedding_model'),
             'palette': ['#c05b3e','#efaa62','#733a2d'], 'emoji': '🍳'}
