@@ -11,16 +11,20 @@
   - Independent workstreams. Two isolated design outputs; coupled product implementation has one owner.
   - Shared mutable state. Product writer gets an exclusive git worktree; root does not write or run suites there while owned. User data stays outside that worktree.
   - Smallest safe decomposition. One implementation owner for domain/schema/workflow/prompt/UI so source facts and step contracts cannot drift across concurrent writers. Independent verifier follows.
-- [ ] Delegate code-writing to a subagent using your configured feature model.
-- [ ] Verify on the matching surface.
-- [ ] Rebase into small, ordered commits. Stack follow-ups.
+- [x] Delegate code-writing to a subagent using your configured feature model.
+  - skip: session capacity rejected new agents. Root implemented in an exclusive worktree; finished non-author reviewers reused through native follow-up with current briefs and exact revisions.
+- [x] Verify on the matching surface.
+  - 61 Python/API tests, JS syntax and both DOM suites passed. Local Gemma synthetic example completed before final review fixes. Stored transcript evaluation returned review without changing source. No browser is connected, so visual/mobile testing is not verified.
+- [x] Rebase into small, ordered commits. Stack follow-ups.
   - Use additive commits; no rebase needed unless topology requires it. Preserve existing user history.
-- [ ] If the design is contested, `interrogate` before shipping.
-  - Pending design comparison.
-- [ ] Run **Opening a PR**.
+- [x] If the design is contested, `interrogate` before shipping.
+  - skip: independent design cross-judge agreed on the chosen contract. Correctness review found three implementation gaps; all reproduced with failing regressions and fixed in 4e595a3.
+- [x] Run **Opening a PR**.
   - skip: user authorized local commits and local main merge, not remote push or PR creation.
-- [ ] Independent verification of exact head before local main merge.
-- [ ] Fast-forward local main and confirm ancestry, status, and tests.
+- [x] Independent verification of exact head before local main merge.
+  - Non-author reviewer returned PASS + NOTES on 4e595a3. All 61 Python/API tests, JS syntax and both DOM suites passed; three correctness findings resolved. Browser/mobile appearance remains untested.
+- [x] Fast-forward local main and confirm ancestry, status, and tests.
+  - main fast-forwarded from 848613e to verified code 4e595a3. Backup ref backup/main-before-step-quality-20261022 preserves the prior main. Main Python tests passed; no remote push or PR.
 
 ## Design arena
 
