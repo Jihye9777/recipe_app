@@ -87,6 +87,8 @@ def _check_step(step, raw):
     issues = []; quote = step['evidence']; action = step['action']
     if quote not in raw or action not in quote or not COOKING.search(action):
         issues.append('조리 동작과 원문 근거 확인 필요')
+    if action.rstrip('. ') != quote.rstrip('. '):
+        issues.append('원문 조리 행위가 사실 추출에서 축약됐습니다')
     if len(_clauses(quote)) > 1:
         issues.append('여러 원문 행위의 기구·시간 연결 확인 필요')
     if re.search(r'쓰지|사용하지|넣지|금지|말고|아니라', quote):
@@ -98,6 +100,8 @@ def _check_step(step, raw):
     if _tools(quote) - tools:
         issues.append('원문의 조리 기구가 단계에서 누락됐습니다')
     times = _times(quote); duration = step['duration_seconds']
+    if step['duration_text'] is not None and (duration is None or step['duration_text'] not in quote):
+        issues.append('시간 값과 원문 시간 표현의 근거가 일치하지 않습니다')
     if times and (duration is None or Fraction(str(duration)) not in times):
         issues.append('원문 조리 시간이 누락되거나 변경됐습니다')
     if duration is not None and (Fraction(str(duration)) not in times
@@ -106,6 +110,12 @@ def _check_step(step, raw):
         issues.append('시간 값과 원문 시간 표현의 근거가 일치하지 않습니다')
     for item in step['ingredients']:
         issues.extend(_check_item(item, quote))
+    for name, number, unit in MENTION.findall(_fold(quote)):
+        name = canonical(re.sub(r'(?:은|는|을|를)$', '', name))
+        expected = _amounts(number + unit)
+        if not any(canonical(item['name']) == name and _quantity(item) in expected
+                   for item in step['ingredients']):
+            issues.append(f'{name}: 단계의 명시적 재료·분량이 누락됐습니다')
     return issues
 
 

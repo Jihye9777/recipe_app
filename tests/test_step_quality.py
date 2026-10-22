@@ -129,3 +129,25 @@ class StepQualityTests(unittest.TestCase):
         r['step_details'][0]['ingredients'][0]['amount_role'] = 'partial'
         f['steps'][0]['ingredients'][0]['amount_role'] = 'partial'
         self.assertEqual(self.check(r, f), [])
+
+    def test_text_only_fabricated_duration_requires_review(self):
+        """초 값 없이 표시 시간만 만들어도 자동 저장 검사에서 거부한다."""
+        r = copy.deepcopy(RECIPE); f = copy.deepcopy(FACTS)
+        r['step_details'][0]['duration_text'] = '10분'
+        f['steps'][0]['duration_text'] = '10분'
+        self.assertTrue(self.check(r, f))
+
+    def test_both_passes_cannot_shorten_the_source_action(self):
+        """사실과 후보가 함께 동작을 축약해도 완전한 원문 행위와 대조한다."""
+        r = copy.deepcopy(RECIPE); f = copy.deepcopy(FACTS)
+        r['step_details'][0]['action'] = f['steps'][0]['action'] = '넣고'
+        from recipe_quality import render_steps
+        r['steps'] = render_steps(r['step_details'])
+        self.assertTrue(self.check(r, f))
+
+    def test_both_passes_cannot_drop_explicit_step_ingredient_use(self):
+        """전체 재료가 남아 있어도 단계의 명시적 재료·분량 누락은 검토한다."""
+        r = copy.deepcopy(RECIPE); f = copy.deepcopy(FACTS)
+        r['step_details'][0]['ingredients'] = []
+        f['steps'][0]['ingredients'] = []
+        self.assertTrue(self.check(r, f))
