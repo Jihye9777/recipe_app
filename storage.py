@@ -45,6 +45,8 @@ class Store:
                 db.execute('ALTER TABLE recipes ADD COLUMN index_backend TEXT')
             if 'embedding_model' not in recipe_columns:
                 db.execute('ALTER TABLE recipes ADD COLUMN embedding_model TEXT')
+            if 'sources' not in recipe_columns:
+                db.execute("ALTER TABLE recipes ADD COLUMN sources TEXT NOT NULL DEFAULT '{}'")
     @contextmanager
     def connect(self):
         """트랜잭션과 종료를 자동 관리하는 SQLite 연결을 제공한다.
@@ -75,7 +77,7 @@ class Store:
         """
         if row is None: return None
         data = dict(row)
-        for key in ('recipe', 'semantic'): data[key] = json.loads(data[key])
+        for key in ('recipe', 'semantic', 'sources'): data[key] = json.loads(data[key])
         return data
     def all(self):
         """저장된 모든 레시피를 최신순으로 조회한다.
@@ -123,7 +125,7 @@ class Store:
         """
         with self.connect() as db:
             return self.unpack(db.execute('SELECT * FROM recipes WHERE source_key=?', (key,)).fetchone())
-    def save(self, id, key, url, transcript, recipe, semantic, model):
+    def save(self, id, key, url, transcript, recipe, semantic, model, *, sources=None):
         """검증된 레시피 원본을 중복 없이 저장한다.
 
         Args:
@@ -134,6 +136,7 @@ class Store:
             recipe: 검증·정규화된 레시피 사전.
             semantic: 버전형 시맨틱 파생 정보 사전.
             model: 구조화에 사용한 생성 모델 이름.
+            sources: 시점·인용·교정 기록이 있는 출처 묶음. 과거 호출은 빈 JSON.
 
         Returns:
             저장된 행 또는 동일 ``key``로 먼저 존재하던 행의 역직렬화 사전.
@@ -142,8 +145,9 @@ class Store:
             새 행의 벡터 상태는 기본값 ``pending``으로 기록된다.
         """
         with self.connect() as db:
-            db.execute('INSERT OR IGNORE INTO recipes(id,source_key,source_url,transcript,recipe,semantic,model) VALUES(?,?,?,?,?,?,?)',
-                       (id,key,url,transcript,json.dumps(recipe,ensure_ascii=False),json.dumps(semantic,ensure_ascii=False),model))
+            db.execute('INSERT OR IGNORE INTO recipes(id,source_key,source_url,transcript,recipe,semantic,model,sources) VALUES(?,?,?,?,?,?,?,?)',
+                       (id,key,url,transcript,json.dumps(recipe,ensure_ascii=False),json.dumps(semantic,ensure_ascii=False),model,
+                        json.dumps(sources or {}, ensure_ascii=False)))
         return self.find(key)
     def indexed(self, id, status, error=None, backend=None, embedding_model=None):
         """레시피의 검색 인덱스 처리 결과를 갱신한다.
@@ -254,6 +258,8 @@ def public(row):
     """
     r = row['recipe']
     return {**r, 'id': row['id'], 'source': row['source_url'],
+            'sources': row.get('sources', {}),
+            'quality_status': row['semantic'].get('quality_status', 'unverified'),
             'ingredient_details': r['ingredients'],
             'ingredients': [ingredient_display(x) for x in r['ingredients']],
             'semantic': row['semantic'], 'index_status': row['index_status'],

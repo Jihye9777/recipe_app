@@ -52,12 +52,16 @@ function updateRecipeSelection() {
     input.disabled=bulkDeleting;
   });
 }
+function qualityLabel(recipe) {
+  const status=recipe.quality_status || recipe.semantic?.quality_status || 'unverified';
+  return status==='draft'?'초안 · 원본 확인 필요':status==='checked'?'자료 대조 검사 통과':'이전 결과 · 미검증';
+}
 function renderRecipes() {
   const available=new Set(recipes.map(recipe=>recipe.id));
   selectedRecipeIds=new Set([...selectedRecipeIds].filter(id=>available.has(id)));
   if(!recipes.length) selectionMode=false;
   qs('#recipe-count').textContent=`${recipes.length}개의 레시피 · SQLite`;
-  qs('#recipe-grid').innerHTML=recipes.map((r,i)=>`<article class="recipe-card${selectionMode?' selecting':''}" data-index="${i}" ${selectionMode?'':'tabindex="0" role="button"'}>${selectionMode?`<label class="recipe-select-label"><input class="recipe-select" type="checkbox" data-select-id="${esc(r.id)}" aria-label="${esc(r.title)} 삭제 대상으로 선택" />삭제할 레시피 선택</label>`:''}<span class="recipe-number">DIARY / ${String(i+1).padStart(2,'0')}</span><div class="recipe-meta"><span>${esc(r.category)}</span><span>${r.time ? esc(r.time)+'분':'시간 미상'}</span></div><h3>${esc(r.title)}</h3><p>${esc(r.ingredients.slice(0,4).join(' · '))}</p><span class="card-open">${selectionMode?'체크박스로 선택하세요':'요리 일기 펼쳐보기 <span aria-hidden="true">↗</span>'}</span></article>`).join('') || '<div class="empty-state"><span class="section-kicker">YOUR FIRST PAGE</span><h3>첫 요리 일기를 기다리고 있어요</h3><p>다시 만들고 싶은 레시피로 첫 페이지를 채워보세요.</p><button class="primary-button" id="empty-import">첫 레시피 담기</button></div>';
+  qs('#recipe-grid').innerHTML=recipes.map((r,i)=>`<article class="recipe-card${selectionMode?' selecting':''}" data-index="${i}" ${selectionMode?'':'tabindex="0" role="button"'}>${selectionMode?`<label class="recipe-select-label"><input class="recipe-select" type="checkbox" data-select-id="${esc(r.id)}" aria-label="${esc(r.title)} 삭제 대상으로 선택" />삭제할 레시피 선택</label>`:''}<span class="recipe-number">DIARY / ${String(i+1).padStart(2,'0')}</span><div class="recipe-meta"><span>${esc(r.category)}</span><span>${r.time ? esc(r.time)+'분':'시간 미상'}</span><span>${esc(qualityLabel(r))}</span></div><h3>${esc(r.title)}</h3><p>${esc(r.ingredients.slice(0,4).join(' · '))}</p><span class="card-open">${selectionMode?'체크박스로 선택하세요':'요리 일기 펼쳐보기 <span aria-hidden="true">↗</span>'}</span></article>`).join('') || '<div class="empty-state"><span class="section-kicker">YOUR FIRST PAGE</span><h3>첫 요리 일기를 기다리고 있어요</h3><p>다시 만들고 싶은 레시피로 첫 페이지를 채워보세요.</p><button class="primary-button" id="empty-import">첫 레시피 담기</button></div>';
   if(qs('#empty-import')) qs('#empty-import').onclick=()=>showView('import');
   qsa('#recipe-grid [data-index]').forEach(el=>{
     if(selectionMode) return;
@@ -120,13 +124,36 @@ function stepEvidence(details) {
   }).join('');
   return `<details class="step-evidence"><summary>단계별 원문 근거</summary><ol>${items}</ol></details>`;
 }
+function sourceEvidence(bundle) {
+  if(!bundle?.sources?.length) return '';
+  const names={caption:'자막',description:'설명란',screen_text:'화면 글씨 · AI 판독',visual_action:'화면 동작 · AI 관찰',speech:'Whisper 음성',manual:'직접 입력'};
+  const videoId=/^[A-Za-z0-9_-]{11}$/.test(bundle.video_id)?bundle.video_id:null;
+  const items=bundle.sources.map(source=>{
+    const seconds=source.start;
+    const time=seconds===null || seconds===undefined?'시점 없음':`${Math.floor(seconds/60)}:${String(Math.floor(seconds%60)).padStart(2,'0')}`;
+    const link=videoId && seconds!==null && seconds!==undefined?`<a href="https://www.youtube.com/watch?v=${videoId}&amp;t=${Math.floor(seconds)}s" target="_blank" rel="noopener noreferrer">${esc(time)} 원본 보기</a>`:esc(time);
+    return `<li><p>${esc(names[source.kind] || source.kind)} · ${link} · ${esc(source.id)}</p><blockquote>${esc(source.text || '(표시된 글씨 없음)')}</blockquote>${source.readable===false?'<p>판독 어려움 · 확인이 필요해요</p>':''}</li>`;
+  }).join('');
+  const corrections=(bundle.corrections || []).map(item=>`<li>${esc(item.original)} → ${esc(item.corrected)} (${esc(item.source_id)} / ${esc(item.target_source_id)})</li>`).join('');
+  return `<details class="source-evidence"><summary>자막·설명란·화면 출처 확인</summary><p>간격별 화면을 AI가 읽은 자료입니다. 원본 전체를 검증한 결과가 아니며 글씨를 잘못 읽을 수 있어요.</p><ul>${(bundle.warnings || []).map(issue=>`<li>${esc(issue)}</li>`).join('')}</ul>${corrections?`<h3>화면 근거가 연결된 교정</h3><ul>${corrections}</ul>`:''}<ol>${items}</ol></details>`;
+}
 function showSavedRecipe(r) {
   showView('import');
   qs('#analysis-area').innerHTML=`<article class="analysis-result"><div class="result-top"><div><span class="section-kicker">SQLite에 저장됨 · 검색 인덱스: ${esc(r.index_status)}</span><h2>${esc(r.title)}</h2><p>${esc(r.category)} · ${r.time ? esc(r.time)+'분':'시간 미상'}</p></div><button class="save-button" id="back-to-recipes">내 요리 일기로</button></div><div class="result-columns"><div><h3>준비할 재료</h3><ul>${r.ingredients.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div><div><h3>조리 순서</h3><ol>${r.steps.map(x=>`<li>${esc(x)}</li>`).join('')}</ol></div></div><p class="helper">매운맛: ${r.semantic.spice_level ?? '알 수 없음'} (재료 기반 추정) · 알레르기 안전성은 검증되지 않았습니다.</p><button class="text-button" id="reindex">검색 인덱스 다시 만들기</button><p id="index-message" role="status"></p></article>`;
   qs('#back-to-recipes').onclick=()=>showView('home');
+  qs('#analysis-area .result-top').insertAdjacentHTML('afterend', `<p class="quality-notice" role="status">${esc(qualityLabel(r))}${r.quality_status==='draft'?' · 저장된 초안입니다. 누락·단위·조리 순서를 원본에서 확인한 뒤 사용하세요.':''}</p>`);
   qs('#analysis-area .analysis-result').insertAdjacentHTML('beforeend', stepEvidence(r.step_details));
+  qs('#analysis-area .analysis-result').insertAdjacentHTML('beforeend', sourceEvidence(r.sources));
+  if(/^https?:\/\/(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\//.test(r.source || '')) {
+    qs('#analysis-area .analysis-result').insertAdjacentHTML('beforeend','<button class="text-button" id="reanalyze-recipe" type="button">원본 보존하고 새로 분석</button><p class="helper">새 결과는 별도 후보로 저장돼요. 기존 레시피는 유지됩니다.</p>');
+    qs('#reanalyze-recipe').onclick=async e=>{
+      e.target.disabled=true;
+      try {const out=await api('/api/reanalyze',{recipe_id:r.id});pollJob(out.job_id);}
+      catch(error){toast(error.message);e.target.disabled=false;}
+    };
+  }
   if (r.semantic.quality_issues?.length) {
-    qs('#analysis-area .analysis-result').insertAdjacentHTML('beforeend', `<p class="helper">사용자가 확인해 저장한 내용입니다. 원문 대조 검토 사유 ${esc(r.semantic.quality_issues.length)}개가 남아 있습니다.</p>`);
+    qs('#analysis-area .analysis-result').insertAdjacentHTML('beforeend', `<details class="quality-issues"><summary>남은 검토 항목 ${esc(r.semantic.quality_issues.length)}개</summary><ul>${r.semantic.quality_issues.map(issue=>`<li>${esc(issue)}</li>`).join('')}</ul></details>`);
   }
   qs('#analysis-area .analysis-result').dataset.recipeId=r.id;
   qs('#analysis-area .analysis-result').insertAdjacentHTML('beforeend','<button class="text-button danger-button" id="delete-recipe" type="button">레시피 삭제</button>');
@@ -152,16 +179,17 @@ function showSavedRecipe(r) {
     catch(error){toast(error.message);e.target.disabled=false;if(qs('#delete-recipe'))qs('#delete-recipe').disabled=false;}
   };
 }
-const stages={validate_url:'URL·중복 확인',extract_transcript:'자막 추출 / Whisper',preprocess:'자막 전처리',extract_facts:'원문 재료·기구·시간 사실 추출',structure:'LLM 구조화·검증',normalize:'재료 정규화·품질 검사',repair:'LLM 재검토',review:'사용자 확인',persist:'SQLite 저장',embed:'임베딩 생성',index:'Qdrant Local 인덱싱'};
+const stages={validate_url:'URL·중복 확인',extract_transcript:'자막·설명란·화면 수집',collect_captions:'자막 수집',collect_speech:'로컬 음성 인식',collect_description:'설명란·영상 정보 수집',collect_frames:'시간별 화면 수집',inspect_frames:'화면 글씨·조리 동작 판독',preprocess:'자료 전처리',extract_facts:'출처별 재료·기구·시간 사실 대조',structure:'LLM 구조화·검증',normalize:'재료 정규화·누락 검사',repair:'LLM 재검토',review:'사용자 확인',persist:'SQLite 저장',embed:'임베딩 생성',index:'Qdrant Local 인덱싱'};
 function failure(error,id) {
   qs('#analysis-area').innerHTML=`<div class="analysis-result"><h2>처리를 완료하지 못했어요</h2><p>${esc(error.message)}</p><p class="helper">YouTube 수집이 막힌 경우 자막/레시피 텍스트를 직접 붙여 넣을 수 있어요.</p>${id?'<button class="text-button" id="retry-job">중단된 단계 재시도</button>':''}</div>`;
   if(id) qs('#retry-job').onclick=async()=>{try{await api('/api/retry',{job_id:id});pollJob(id);}catch(e){toast(e.message);}};
 }
 function showReview(job) {
   const review=job.result;
-  qs('#analysis-area').innerHTML=`<div class="analysis-result"><h2>저장 전 확인이 필요해요</h2><ul>${review.issues.map(x=>`<li>${esc(x)}</li>`).join('')}</ul><details><summary>원문 확인</summary><p>${esc(review.transcript)}</p></details><label for="review-json">레시피 JSON을 확인·수정하세요 (수량을 모르면 null)</label><textarea id="review-json" rows="18"></textarea><button class="primary-button" id="approve">내용을 확인했어요 · 저장</button></div>`;
+  qs('#analysis-area').innerHTML=`<div class="analysis-result"><h2>초안 · 저장 전 확인이 필요해요</h2><p>누락·판독 오류가 남아 있으면 저장 후에도 초안으로 표시됩니다.</p><ul>${review.issues.map(x=>`<li>${esc(x)}</li>`).join('')}</ul><details><summary>원문 확인</summary><p>${esc(review.transcript)}</p></details><label for="review-json">레시피 JSON을 확인·수정하세요 (수량을 모르면 null)</label><textarea id="review-json" rows="18"></textarea><button class="primary-button" id="approve">내용을 확인했어요 · 초안 저장</button></div>`;
   qs('#review-json').value=JSON.stringify(review.recipe,null,2);
   qs('#analysis-area .analysis-result').insertAdjacentHTML('beforeend', stepEvidence(review.source_facts?.steps || review.recipe?.step_details));
+  qs('#analysis-area .analysis-result').insertAdjacentHTML('beforeend', sourceEvidence(review.sources));
   qs('#approve').onclick=async e=>{
     try { const recipe=JSON.parse(qs('#review-json').value); e.target.disabled=true; await api('/api/review',{job_id:job.id,approved:true,recipe}); pollJob(job.id); }
     catch(error){toast(error.message);e.target.disabled=false;}
@@ -176,12 +204,12 @@ async function pollJob(id) {
       if(version!==pollVersion) return;
       if(job.status==='complete') {
         localStorage.removeItem('hanip-job-id'); await refreshRecipes(); showSavedRecipe(job.result.recipe);
-        qs('#index-message').textContent=job.result.index_error ? `SQLite 원본은 저장되었습니다. 검색 인덱스 실패: ${job.result.index_error}` : (job.result.duplicate?'이미 저장된 레시피입니다.':'분석 및 저장 완료');
+        qs('#index-message').textContent=job.result.index_error ? `SQLite 원본은 저장되었습니다. 검색 인덱스 실패: ${job.result.index_error}` : (job.result.duplicate?(job.result.notice || '이미 저장된 레시피입니다. 새로 분석하지 않았어요.'):(job.result.recipe.quality_status==='draft'?'초안 저장 완료 · 원본 확인이 필요해요':'분석 및 저장 완료'));
         return;
       }
       if(job.status==='review'){showReview(job);return;}
       if(job.status==='failed'){failure(new Error(job.error),id);return;}
-      qs('#analysis-area').innerHTML=`<div class="analysis-loading"><div class="loader"></div><strong>${esc(stages[job.stage] || '작업 대기 중')}</strong><p>로컬 모델 속도에 따라 수 분이 걸릴 수 있어요. 새로고침해도 작업 ID로 다시 확인합니다.</p><button id="resume-job" class="text-button">서버 재시작 후 작업 재개</button></div>`;
+      qs('#analysis-area').innerHTML=`<div class="analysis-loading"><div class="loader"></div><strong>${esc(stages[job.stage] || '작업 대기 중')}</strong><p>목표 대기시간은 약 1분이지만 화면 판독·로컬 모델 속도에 따라 수 분이 걸릴 수 있어요. 실제 완료 시간의 보장은 아니에요. 새로고침해도 작업 ID로 다시 확인합니다.</p><button id="resume-job" class="text-button">서버 재시작 후 작업 재개</button></div>`;
       qs('#resume-job').onclick=async()=>{try{await api('/api/retry',{job_id:id});}catch(e){toast(e.message);}};
       await new Promise(resolve=>setTimeout(resolve,1500));
     }
@@ -209,12 +237,12 @@ async function renderRecommendations() {
   try {
     const out=await api('/api/search',{pantry,query:qs('#search-query').value,max_time:number('#max-time'),max_missing:number('#max-missing'),min_spice:number('#min-spice'),exclude_ingredients:commaList('#exclude'),allergens:commaList('#allergens'),tools:qs('#tools').value.trim()?commaList('#tools'):null,tips:qs('#tips').checked});
     if(version!==searchVersion)return;
-    qs('#recommendations').innerHTML=out.warnings.map(x=>`<p class="helper">${esc(x)}</p>`).join('')+(out.recipes.map((r,i)=>`<article class="recommend-item" data-result="${i}" tabindex="0" role="button"><div><h3>${esc(r.title)}</h3><p>${r.missing.length?'부족: '+esc(r.missing.join(', ')):'재료 종류 일치 · 수량 확인 필요'}</p></div><div class="match"><strong>${r.coverage}%</strong>재료 종류 일치</div></article>`).join('')||'<p>조건에 맞는 레시피가 없어요. 알레르기 조건은 안전성 미검증 레시피를 모두 제외합니다.</p>')+(out.tips?`<div class="analysis-result"><h3>AI 조리 팁 · 검증되지 않은 제안</h3><p>${esc(out.tips)}</p></div>`:'');
+    qs('#recommendations').innerHTML=out.warnings.map(x=>`<p class="helper">${esc(x)}</p>`).join('')+(out.recipes.map((r,i)=>`<article class="recommend-item" data-result="${i}" tabindex="0" role="button"><div><h3>${esc(r.title)}</h3><p>${esc(qualityLabel(r))}</p><p>${r.missing.length?'부족: '+esc(r.missing.join(', ')):'재료 종류 일치 · 수량 확인 필요'}</p></div><div class="match"><strong>${r.coverage}%</strong>재료 종류 일치</div></article>`).join('')||'<p>조건에 맞는 레시피가 없어요. 알레르기 조건은 안전성 미검증 레시피를 모두 제외합니다.</p>')+(out.tips?`<div class="analysis-result"><h3>AI 조리 팁 · 검증되지 않은 제안</h3><p>${esc(out.tips)}</p></div>`:'');
     qsa('[data-result]').forEach(el=>{el.onclick=()=>showSavedRecipe(out.recipes[Number(el.dataset.result)]);el.onkeydown=e=>{if(['Enter',' '].includes(e.key)){e.preventDefault();el.click();}};});
   } catch(e){if(version===searchVersion)qs('#recommendations').textContent=e.message;}
 }
 async function refreshLlmStatus() {
-  try {const s=await api('/api/status'); qs('#llm-status').className=`llm-status ${s.running&&s.modelInstalled?'online':'offline'}`;qs('#llm-status').textContent=s.running&&s.modelInstalled?`로컬 AI · ${s.model}`:'Ollama / 모델 연결 확인 필요';}
+  try {const s=await api('/api/status'); const current=s.evidence_version==='recipe-sources-v2';qs('#llm-status').className=`llm-status ${current&&s.running&&s.modelInstalled?'online':'offline'}`;qs('#llm-status').textContent=!current?'업데이트 반영 필요 · 서버 재시작':s.running&&s.modelInstalled?`로컬 AI · ${s.model}`:'Ollama / 모델 연결 확인 필요';qs('#llm-status').title=s.code_version?`서버 ${s.code_version} · 시작 ${s.started_at} · 검사 ${s.quality_version}`:'이전 서버입니다. 업데이트 후 재시작이 필요해요.';}
   catch {qs('#llm-status').textContent='앱 서버 연결 실패';}
 }
 async function refreshServiceHealth() {

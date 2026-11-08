@@ -135,6 +135,30 @@ class HTTPTests(unittest.TestCase):
         self.assertIn('pantry', search['properties'])
         self.assertIn('max_missing', search['properties'])
 
+    def test_reanalysis_api_preserves_original_and_creates_new_candidate(self):
+        """동일 영상의 명시 재분석은 새 ID로 저장하며 원본·인덱스는 유지한다."""
+        _, accepted = self.request('/api/analyze', {'url':'https://youtu.be/aFFnos58S14'})
+        first = self.job(accepted['job_id'])
+        original_id = first['result']['recipe']['id']
+        original = self.server.STORE.get(original_id)
+        code, accepted = self.request('/api/reanalyze', {'recipe_id':original_id})
+        self.assertEqual(code, 202)
+        result = self.job(accepted['job_id'])
+        self.assertEqual(result['status'], 'complete', result)
+        self.assertNotEqual(result['result']['recipe']['id'], original_id)
+        self.assertEqual(result['result']['recipe']['semantic']['reanalyze_of'], original_id)
+        self.assertEqual(self.server.STORE.get(original_id), original)
+        self.assertEqual(self.request('/api/reanalyze', {'recipe_id':'missing'})[0], 404)
+
+    def test_runtime_version_is_available_even_if_ollama_is_offline(self):
+        """현재 로드된 코드 식별자·시작 시각으로 오래된 서버를 구별할 수 있다."""
+        with patch.object(self.server, 'urlopen', side_effect=OSError('offline')):
+            code, status = self.request('/api/status')
+        self.assertEqual(code, 200)
+        self.assertEqual(status['quality_version'], 'multisource-evidence-v2')
+        self.assertEqual(len(status['code_version']), 12)
+        self.assertTrue(status['started_at'])
+
     def test_docs_and_existing_frontend_are_available(self):
         """Swagger UI와 기존 홈페이지가 함께 제공되는지 검증한다."""
         for path, marker in [('/docs', 'swagger-ui'), ('/redoc', 'redoc'), ('/', '<html')]:

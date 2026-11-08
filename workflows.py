@@ -10,9 +10,10 @@ from urllib.parse import urlparse, parse_qs
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Command
 from langgraph.checkpoint.sqlite import SqliteSaver
-from domain import Recipe, SourceFacts, SearchInput, normalize, canonical, quality, semantic
+from domain import Recipe, Ingredient, SourceFacts, SearchInput, normalize, canonical, quality, semantic
 from recipe_quality import QUALITY_VERSION, source_quality, render_steps
 from storage import public
+from evidence import SourceBundle, Correction, effective_text, evidence_quality, QUALITY_VERSION as MULTISOURCE_QUALITY_VERSION
 
 class State(TypedDict, total=False):
     """두 LangGraph가 노드 사이에서 공유하는 부분 상태.
@@ -44,6 +45,8 @@ class State(TypedDict, total=False):
     source_issues: list[str]
     quality_version: str
     approved_recipe_hash: str
+    source_bundle: dict
+    reanalyze_of: str
 
 def valid_video(url):
     """허용된 YouTube URL을 검증하고 11자리 영상 ID를 추출한다.
@@ -69,7 +72,7 @@ def valid_video(url):
 class Pipelines:
     """레시피 수집과 검색을 실행하는 두 개의 결정적 LangGraph 묶음."""
 
-    def __init__(self, store, llm, index, extract, checkpoint_path):
+    def __init__(self, store, llm, index, extract, checkpoint_path, *, collector=None):
         """의존성을 연결하고 수집·검색 그래프를 컴파일한다.
 
         Args:
@@ -85,6 +88,7 @@ class Pipelines:
             서버 종료 시 ``checkpoint_db.close()``를 호출해야 한다.
         """
         self.store, self.llm, self.index, self.extract = store,llm,index,extract
+        self.collector = collector
         self.checkpoint_db = sqlite3.connect(checkpoint_path,check_same_thread=False)
         self.checkpointer = SqliteSaver(self.checkpoint_db)
         g = StateGraph(State)
@@ -99,7 +103,7 @@ class Pipelines:
         g.add_edge('extract_transcript','preprocess'); g.add_edge('preprocess','extract_facts')
         g.add_edge('extract_facts','structure')
         g.add_edge('structure','normalize')
-        g.add_conditional_edges('normalize',lambda s:'repair' if s['issues'] else 'persist')
+        g.add_conditional_edges('normalize',lambda s: ('review' if s.get('source_bundle') else 'repair') if s['issues'] else 'persist')
         g.add_edge('repair','review'); g.add_edge('review','persist')
         g.add_edge('persist','embed'); g.add_edge('embed','index'); g.add_edge('index',END)
         self.ingest = g.compile(checkpointer=self.checkpointer)
@@ -149,8 +153,14 @@ class Pipelines:
         if len(text)>60000: raise ValueError('텍스트를 60,000자 이하로 나누어 주세요.')
         if text: key,vid = 'text:'+hashlib.sha256(text.encode()).hexdigest(),''
         else: vid=valid_video(s['url']); key='youtube:'+vid
+        if s.get('reanalyze_of'):
+            original = self.store.get(s['reanalyze_of'])
+            if text or not original or valid_video(original['source_url']) != vid:
+                raise ValueError('재분석할 원본 영상과 레시피를 확인해 주세요.')
+            key += ':analysis:' + s['job_id']
         row=self.store.find(key)
-        return {'key':key,'video_id':vid,'row':row,'result':{'recipe':public(row),'duplicate':True} if row else {}}
+        return {'key':key,'video_id':vid,'row':row,'result':{'recipe':public(row),'duplicate':True,
+                'notice':'기존 저장 결과입니다. 새로 분석하지 않았어요. 상세 화면에서 재분석할 수 있어요.'} if row else {}}
     def collect(self,s):
         """직접 입력 텍스트를 선택하거나 YouTube 자막 추출기를 호출한다.
 
@@ -164,6 +174,11 @@ class Pipelines:
             extract callable이 발생시키는 자막·음성 수집 관련 예외.
         """
         text=s.get('text','').strip()
+        if not text and self.collector is not None:
+            bundle = self.collector.collect(s['video_id'], report=lambda stage: self.store.job(s['job_id'], stage=stage))
+            bundle = SourceBundle.model_validate(bundle)
+            raw = '\n'.join(source.text for source in bundle.sources if source.kind != 'visual_action')
+            return {'raw_transcript':raw, 'source_bundle':bundle.model_dump()}
         if not text: text,_,_=self.extract('https://www.youtube.com/watch?v='+s['video_id'])
         return {'raw_transcript':text}
     def preprocess(self,s):
@@ -183,7 +198,7 @@ class Pipelines:
         if len(text)>60000: raise ValueError('영상이 너무 깁니다. 필요한 자막 부분을 직접 입력해 주세요.')
         return {'transcript':text}
     def structure(self,s):
-        """Ollama로 원문을 구조화하고 Recipe 스키마를 1차 검증한다.
+        """영상은 확보한 사실로, 직접 텍스트는 Ollama로 Recipe 후보를 구성한다.
 
         Args:
             s: 전처리된 ``transcript``를 포함한 수집 상태.
@@ -196,36 +211,73 @@ class Pipelines:
             네트워크 오류 등 ``ValueError``가 아닌 Ollama 예외는 상위 실행기로
             전파된다.
         """
+        if s.get('source_bundle'):
+            facts = SourceFacts.model_validate(s.get('source_facts', {}))
+            if not facts.ingredients:
+                return {'recipe': {}, 'issues': ['출처에서 구조화된 재료를 확보하지 못했습니다.']}
+            details = [step.model_dump() for step in facts.steps]
+            ingredients = [{key: value for key, value in item.model_dump().items()
+                            if key in Ingredient.model_fields} for item in facts.ingredients]
+            recipe = Recipe(title=s['source_bundle'].get('title') or '레시피 초안',
+                ingredients=ingredients, steps=render_steps(details) or ['조리 순서 확인 어려움'],
+                tools=list(dict.fromkeys(tool.strip() for step in details
+                                         for tool in step['tools'] if tool.strip())),
+                step_details=details)
+            return {'recipe': recipe.model_dump(), 'issues': []}
         try:
-            r=Recipe.model_validate(self.llm.recipe(s['raw_transcript'], source_facts=copy.deepcopy(s.get('source_facts', {})))).model_dump()
+            r=Recipe.model_validate(self.llm.recipe(self.model_input(s), source_facts=copy.deepcopy(s.get('source_facts', {})))).model_dump()
             return {'recipe':r,'issues':[]}
         except ValueError as error:
             return {'recipe':{},'issues':['JSON 구조 검증 실패: '+str(error)[:1000]]}
     def collect_facts(self, s):
         """raw_transcript에서 사실을 한 번 추출해 고정 JSON 상태와 문제 목록을 반환한다."""
         try:
+            if s.get('source_bundle'):
+                bundle = SourceBundle.model_validate(s['source_bundle'])
+                response = self.llm.evidence_facts(bundle.model_dump())
+                bundle.corrections = [Correction.model_validate(item) for item in response.get('corrections', [])]
+                raw = effective_text(bundle)
+                facts = SourceFacts.model_validate(response['facts'])
+                for index, step in enumerate(facts.steps):
+                    step.source_step = index
+                issues = source_quality(facts, raw)
+                return {'source_facts':facts.model_dump(), 'source_issues':issues,
+                        'source_bundle':bundle.model_dump(), 'quality_version':MULTISOURCE_QUALITY_VERSION}
             facts = SourceFacts.model_validate(self.llm.source_facts(s['raw_transcript']))
             for index, step in enumerate(facts.steps):
                 step.source_step = index
             issues = source_quality(facts, s['raw_transcript'])
             return {'source_facts': facts.model_dump(), 'source_issues': issues,
-                    'quality_version': QUALITY_VERSION}
+                    'quality_version': MULTISOURCE_QUALITY_VERSION if s.get('source_bundle') else QUALITY_VERSION}
         except Exception as error:
             return {'source_facts': {}, 'source_issues': ['원문 사실 추출을 확인하지 못했습니다: ' + type(error).__name__],
-                    'quality_version': QUALITY_VERSION}
+                    'quality_version': MULTISOURCE_QUALITY_VERSION if s.get('source_bundle') else QUALITY_VERSION}
+
+    @staticmethod
+    def model_input(s):
+        """모델용 출처 JSON 또는 직접 입력을 반환한다. 원래 자막은 수정하지 않는다."""
+        if s.get('source_bundle'):
+            return json.dumps({'source_bundle':s['source_bundle']}, ensure_ascii=False)
+        return s['raw_transcript']
 
     def candidate_issues(self, s, recipe):
         """원문·고정 사실·후보를 대조한 검토 사유를 반환한다. 저장하지 않는다."""
         issues = list(s.get('source_issues', []))
-        if s.get('quality_version') != QUALITY_VERSION or not s.get('source_facts'):
+        if s.get('source_bundle'):
+            issues.extend(s['source_bundle'].get('warnings', []))
+        expected_version = MULTISOURCE_QUALITY_VERSION if s.get('source_bundle') else QUALITY_VERSION
+        if s.get('quality_version') != expected_version or not s.get('source_facts'):
             return issues + ['원문 사실·검사 버전이 없어 저장 전 확인이 필요합니다']
         facts = SourceFacts.model_validate(s['source_facts'])
+        if s.get('source_bundle'):
+            return list(dict.fromkeys(issues + evidence_quality(recipe, facts, s['source_bundle'])))
         return list(dict.fromkeys(issues + quality(recipe, s.get('raw_transcript', s.get('transcript', '')), source_facts=facts)))
 
     @staticmethod
-    def recipe_hash(recipe):
+    def recipe_hash(recipe, source_bundle=None):
         """승인 대상 후보를 식별할 정규 JSON 해시를 반환한다. 외부 I/O는 없다."""
-        return hashlib.sha256(json.dumps(recipe, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        value = {'recipe':recipe, 'sources':source_bundle} if source_bundle else recipe
+        return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
     def normal(self,s):
         """재료명·단위를 정규화하고 원문 근거 품질을 검사한다.
@@ -253,7 +305,7 @@ class Pipelines:
             issues에 최대 300자의 재검토 오류를 추가한다.
         """
         try:
-            r=normalize(self.llm.recipe(s['raw_transcript'],'; '.join(s['issues']), source_facts=copy.deepcopy(s.get('source_facts', {}))))
+            r=normalize(self.llm.recipe(self.model_input(s),'; '.join(s['issues']), source_facts=copy.deepcopy(s.get('source_facts', {}))))
             issues = self.candidate_issues(s, r)
             if not issues: r['steps'] = render_steps(r['step_details'])
             return {'recipe':r,'issues':issues, 'user_reviewed': False, 'approved_recipe_hash': ''}
@@ -277,11 +329,14 @@ class Pipelines:
             확인이 필요하면 ``interrupt``를 호출해 체크포인트에 상태를 남긴다.
         """
         if not s['issues']: return {}
+        if not s.get('recipe'):
+            raise RuntimeError('로컬 모델이 유효한 레시피 형식을 만들지 못했습니다. 다시 분석하거나 원문 텍스트로 시도해 주세요.')
         answer=interrupt({'recipe':s['recipe'],'issues':s['issues'],'transcript':s.get('raw_transcript', s['transcript']),
-                          'source_facts':s.get('source_facts', {}), 'quality_version':s.get('quality_version')})
+                          'source_facts':s.get('source_facts', {}), 'quality_version':s.get('quality_version'),
+                          'sources':s.get('source_bundle', {}), 'quality_status':'draft'})
         if not answer.get('approved'): raise ValueError('저장이 취소되었습니다.')
         r=normalize(answer.get('recipe') or s['recipe'])
-        return {'recipe':r,'issues':[], 'user_reviewed':True, 'approved_recipe_hash': self.recipe_hash(r)}
+        return {'recipe':r,'issues':[], 'user_reviewed':True, 'approved_recipe_hash': self.recipe_hash(r, s.get('source_bundle'))}
     def persist(self,s):
         """시맨틱 파생 정보를 만들고 SQLite 원본 레시피를 저장한다.
 
@@ -295,24 +350,27 @@ class Pipelines:
             ``recipes`` 테이블에 pending 인덱스 상태로 행을 삽입할 수 있다.
         """
         r = normalize(s['recipe'])
-        confirmed = bool(s.get('user_reviewed') and s.get('approved_recipe_hash') == self.recipe_hash(r))
+        confirmed = bool(s.get('user_reviewed') and s.get('approved_recipe_hash') == self.recipe_hash(r, s.get('source_bundle')))
         issues = self.candidate_issues(s, r)
         if not confirmed and (issues or s.get('user_reviewed')):
             if s.get('user_reviewed'): issues.append('승인한 후보와 현재 저장 후보가 달라 다시 확인해야 합니다')
             answer = interrupt({'recipe':r,'issues':issues,'transcript':s.get('raw_transcript', s.get('transcript','')),
-                                'source_facts':s.get('source_facts',{}), 'quality_version':s.get('quality_version')})
+                                'source_facts':s.get('source_facts',{}), 'quality_version':s.get('quality_version'),
+                                'sources':s.get('source_bundle',{}), 'quality_status':'draft'})
             if not answer.get('approved'): raise ValueError('저장이 취소되었습니다.')
             r = normalize(answer.get('recipe') or r)
             confirmed = True
         if not confirmed: r['steps'] = render_steps(r['step_details'])
         sem=semantic(r,s.get('raw_transcript',s.get('transcript','')))
         sem['review_status']='user_confirmed' if confirmed else 'automated_checks_passed'
-        sem['quality_version'] = QUALITY_VERSION
+        sem['quality_version'] = s.get('quality_version', QUALITY_VERSION)
         sem['quality_issues'] = self.candidate_issues(s, r) if confirmed else []
+        sem['quality_status'] = 'draft' if sem['quality_issues'] else 'checked'
+        sem['reanalyze_of'] = s.get('reanalyze_of') or None
         row=self.store.save(str(uuid.uuid5(uuid.NAMESPACE_URL,s['key'])),s['key'],s.get('url',''),s.get('raw_transcript',s.get('transcript','')),
-            r,sem,self.llm.model)
+            r,sem,self.llm.model, sources=s.get('source_bundle'))
         return {'row':row,'recipe':r,'user_reviewed':confirmed,
-                'approved_recipe_hash':self.recipe_hash(r) if confirmed else ''}
+                'approved_recipe_hash':self.recipe_hash(r, s.get('source_bundle')) if confirmed else ''}
     def embed(self,s):
         """레시피 검색 문자열의 임베딩을 생성하되 실패를 원본 손실로 만들지 않는다.
 

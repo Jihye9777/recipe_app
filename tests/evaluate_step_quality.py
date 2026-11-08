@@ -13,6 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from integrations import Ollama, QdrantIndex
 from storage import Store
 from workflows import Pipelines
+from workflows import valid_video
+from sources import EvidenceCollector
+from media_sources import MediaReader
 
 SAMPLE = '식초 1.5스푼을 그릇에 넣고 섞어요.\n달걀 1개를 물에 넣고 전자레인지에서 1분 30초 익혀요.'
 
@@ -50,20 +53,32 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-db', type=Path)
     parser.add_argument('--video-id')
+    parser.add_argument('--fetch-video', action='append', default=[], metavar='VIDEO_ID',
+                        help='자막·설명란·화면을 새로 수집할 영상 ID. 반복 지정 가능')
     parser.add_argument('--ollama-url', default='http://127.0.0.1:11434')
     args = parser.parse_args()
     if urlparse(args.ollama_url).hostname not in {'127.0.0.1', 'localhost', '::1'}:
         parser.error('평가는 loopback 로컬 Ollama만 사용합니다.')
-    cases = read_cases(args.source_db, args.video_id) if args.source_db else [
+    originals = read_cases(args.source_db, args.video_id) if args.source_db else []
+    cases = originals if args.source_db else [
         {'id': 'synthetic', 'source_url': '', 'transcript': SAMPLE, 'recipe': '{}'}]
+    if args.fetch_video:
+        for video_id in args.fetch_video:
+            try:
+                valid_video('https://www.youtube.com/watch?v=' + video_id)
+            except ValueError:
+                parser.error('올바른 11자리 영상 ID를 지정하세요.')
+        cases = [{'id':video_id, 'source_url':'https://www.youtube.com/watch?v=' + video_id,
+                  'transcript':'', 'recipe':'{}'} for video_id in args.fetch_video]
     if not cases: parser.error('평가할 원본 레시피가 없습니다.')
-    original_hash = snapshot(cases)
+    original_hash = snapshot(originals)
     root = Path(__file__).resolve().parents[1] / '.runtime' / ('step-quality-eval-' + uuid.uuid4().hex)
     root.mkdir(parents=True)
     os.environ['NO_PROXY'] = '127.0.0.1,localhost,::1'
     llm = Ollama(); llm.url = args.ollama_url.rstrip('/')
     store = Store(root / 'recipe.db'); index = QdrantIndex(llm, root / 'qdrant')
-    graph = Pipelines(store, llm, index, refuse_extraction, str(root / 'checkpoints.db'))
+    collector = EvidenceCollector(llm, reader=MediaReader(Path(__file__).resolve().parents[1] / '.runtime')) if args.fetch_video else None
+    graph = Pipelines(store, llm, index, refuse_extraction, str(root / 'checkpoints.db'), collector=collector)
     results = []
     try:
         for case in cases:
@@ -75,14 +90,21 @@ def main():
                 'source_facts_present': bool(state.get('source_facts')),
                 'source_issue_count': len(state.get('source_issues', [])),
                 'review_issue_count': len((job.get('result') or {}).get('issues', [])),
+                'review_issues': (job.get('result') or {}).get('issues', []),
+                'source_count':len(state.get('source_bundle', {}).get('sources', [])),
+                'coverage':state.get('source_bundle', {}).get('coverage', {}),
+                'quality_version':state.get('quality_version'),
+                'candidate':state.get('recipe', {}),
+                'sources':state.get('source_bundle', {}),
                 'saved': bool(state.get('row')), 'error': job.get('error')})
             print(json.dumps({'case': len(results), 'status': job['status']}, ensure_ascii=False), flush=True)
     finally:
         graph.checkpoint_db.close(); index.close()
     unchanged = not args.source_db or snapshot(read_cases(args.source_db, args.video_id)) == original_hash
     report = {'model': llm.model, 'source_unchanged': unchanged,
-              'input': 'stored_transcript' if args.source_db else 'synthetic',
-              'not_video_refetch': True, 'cases': results}
+              'input': 'video_refetch' if args.fetch_video else 'stored_transcript' if args.source_db else 'synthetic',
+              'not_video_refetch': not bool(args.fetch_video), 'cases': results,
+              'accuracy_verified':False}
     report_path = root / 'report.json'
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps({'report': str(report_path), 'source_unchanged': unchanged}, ensure_ascii=False), flush=True)

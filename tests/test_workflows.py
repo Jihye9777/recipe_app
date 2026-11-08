@@ -128,10 +128,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.llm.calls,2)
         self.assertEqual(self.store.all()[0]['semantic']['review_status'],'user_confirmed')
 
-    def test_malformed_json_enters_review(self):
-        """계속 잘못된 LLM 구조가 저장되지 않고 검토 상태인지 검증한다."""
+    def test_malformed_json_fails_without_an_empty_review_candidate(self):
+        """유효 후보가 없는 모델 오류는 저장할 수 없는 빈 검토 화면 대신 실패로 알린다."""
         self.llm.response={'title':'invalid'}
-        job=self.ingest(); self.assertEqual(job['status'],'review',job)
+        job=self.ingest(); self.assertEqual(job['status'],'failed',job)
         self.assertEqual(self.llm.calls,2);self.assertEqual(self.store.all(),[])
 
     def test_index_failure_preserves_sql_and_reindex_is_idempotent(self):

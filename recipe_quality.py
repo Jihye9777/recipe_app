@@ -72,6 +72,10 @@ def _quantity(item):
 def _check_item(item, raw):
     """재료 주장의 원문명·인용·분량 지지를 검사해 사유 목록을 반환한다."""
     issues = []; name = item['name']; quote = item['evidence']
+    if item.get('unit') in {'mm', 'cm', 'm'}:
+        issues.append(f'{name}: 길이 단위가 재료 분량에 사용됐습니다. 화면 근거로 단위를 확인하세요')
+    if name in {'양념', '양념장', '소스', '기타', '다른 양념'}:
+        issues.append(f'{name}: 구성 재료·분량 확인이 필요합니다')
     if not quote or quote not in raw or item['raw_name'] not in quote or canonical(item['raw_name']) != canonical(name):
         issues.append(f'{name}: 원문 재료 근거 확인 필요')
     amounts = _item_amounts(item, quote)
@@ -93,12 +97,19 @@ def _check_step(step, raw):
         issues.append('여러 원문 행위의 기구·시간 연결 확인 필요')
     if re.search(r'쓰지|사용하지|넣지|금지|말고|아니라', quote):
         issues.append('부정·대체 지시의 적용 범위 확인 필요')
+    if any(not tool.strip() for tool in step['tools']):
+        issues.append('빈 조리 기구명은 확인이 필요합니다')
     tools = {TOOLS.get(tool, tool) for tool in step['tools']}
     if any(not any(alias in quote for alias, name in TOOLS.items() if name == tool)
            if tool in TOOLS.values() else tool not in quote for tool in tools):
         issues.append('원문에 없는 조리 기구가 추가됐습니다')
     if _tools(quote) - tools:
         issues.append('원문의 조리 기구가 단계에서 누락됐습니다')
+    if step.get('heat') and step['heat'] not in quote:
+        issues.append('불 세기가 해당 원문 근거에 없습니다')
+    heat = re.findall(r'중약불|중강불|약불|중불|강불|센불|약한 불|센 불', quote)
+    if heat and (not step.get('heat') or step['heat'] not in heat):
+        issues.append('원문의 불 세기가 같은 조리 단계에서 누락됐습니다')
     times = _times(quote); duration = step['duration_seconds']
     if step['duration_text'] is not None and (duration is None or step['duration_text'] not in quote):
         issues.append('시간 값과 원문 시간 표현의 근거가 일치하지 않습니다')
@@ -177,6 +188,8 @@ def inspect_recipe(recipe, raw, facts):
             issues.append('원문 조리 행위·조건이 축약되거나 변경됐습니다')
         if set(step['tools']) != set(fact['tools']) or step['duration_seconds'] != fact['duration_seconds']:
             issues.append('같은 단계의 조리 기구·시간이 원문 사실과 다릅니다')
+        if step.get('heat') != fact.get('heat'):
+            issues.append('같은 단계의 불 세기가 원문 사실과 다릅니다')
         uses = {(canonical(i['name']), _quantity(i)) for i in step['ingredients']}
         expected = {(canonical(i['name']), _quantity(i)) for i in fact['ingredients']}
         if uses != expected or any(name not in final_names for name, _ in uses):
@@ -210,6 +223,8 @@ def render_steps(details):
                 extra.append(item['name'] + amount)
         for tool in step['tools']:
             if tool not in text: extra.append(tool)
+        if step.get('heat') and step['heat'] not in text:
+            extra.append(step['heat'])
         if step['duration_seconds'] is not None and Fraction(str(step['duration_seconds'])) not in _times(text):
             extra.append(step['duration_text'] or f"{step['duration_seconds']:g}초")
         result.append(text + ('. ' + ' · '.join(extra) if extra else '') + '.')

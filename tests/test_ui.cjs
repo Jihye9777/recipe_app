@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const {JSDOM} = require('../.runtime/ui-test/node_modules/jsdom');
+const {JSDOM} = require(process.env.RECIPE_JSDOM_PATH || '../.runtime/ui-test/node_modules/jsdom');
 const root=path.resolve(__dirname,'..');
 const recipe={id:'fixture',title:'<img src=x onerror=alert(1)> 달걀 요리',category:'요리',time:5,
   ingredients:['달걀 2 개'],steps:['프라이팬에서 익혀요.'],semantic:{spice_level:null},index_status:'failed'};

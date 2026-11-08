@@ -17,6 +17,12 @@ class JobAccepted(BaseModel):
     job_id: str
 
 
+class ReanalyzeInput(BaseModel):
+    """원본 레시피를 보존하면서 같은 영상의 새 후보를 만드는 요청."""
+
+    recipe_id: str = Field(min_length=1)
+
+
 class RetryInput(BaseModel):
     """실패하거나 중단된 분석 작업의 재시도 요청."""
 
@@ -115,6 +121,10 @@ class StatusOutput(BaseModel):
     model: str
     modelInstalled: bool
     models: list[str]
+    code_version: str = ''
+    started_at: str = ''
+    evidence_version: str = ''
+    quality_version: str = ''
 
 
 class HealthOutput(BaseModel):

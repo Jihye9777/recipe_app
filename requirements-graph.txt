@@ -10,3 +10,5 @@ fastapi>=0.115,<1
 uvicorn>=0.30,<1
 # FastAPI TestClient (also used by existing integrations)
 httpx>=0.28,<1
+# 기존 faster-whisper 의존성으로 설치된 PyAV를 화면 디코딩에도 직접 사용
+av>=18,<19

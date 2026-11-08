@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const {JSDOM} = require('../.runtime/ui-test/node_modules/jsdom');
+const {JSDOM} = require(process.env.RECIPE_JSDOM_PATH || '../.runtime/ui-test/node_modules/jsdom');
 const root = path.resolve(__dirname, '..');
 async function waitFor(fn) {
   for (let i=0;i<150;i++) {

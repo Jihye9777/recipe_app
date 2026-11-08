@@ -231,3 +231,10 @@ summary { min-height: 44px; cursor: pointer; }
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+.quality-notice { padding: 12px 16px; border-left: 4px solid var(--accent, #ad4933); background: #f5e8cf; color: #633b29; }
+.source-evidence { margin-top: 24px; overflow-wrap: anywhere; }
+.source-evidence summary { cursor: pointer; padding: 12px 0; }
+.source-evidence blockquote { margin: 8px 0 20px; padding-left: 12px; border-left: 2px solid #cab698; white-space: pre-wrap; }
+.source-evidence a { text-decoration: underline; text-underline-offset: 3px; }
+.recipe-meta { flex-wrap: wrap; }

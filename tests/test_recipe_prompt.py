@@ -13,6 +13,23 @@ from domain import normalize
 class RecipePromptTests(unittest.TestCase):
     """네트워크 경계만 대체해 실제 요청 본문의 규칙·데이터 분리를 검사한다."""
 
+    def test_structured_generation_has_room_for_input_and_json(self):
+        """기본 4096 문맥에 의존하지 않고 JSON 생성용 문맥·출력 한도를 명시한다."""
+        llm = Ollama()
+        with patch.object(llm, 'post', return_value={'response': '{}'}) as post:
+            llm.generate('합성 원문', {'type': 'object'})
+            payload = post.call_args.args[1]
+            self.assertFalse(payload.get('think', True))
+            self.assertEqual(payload['options'].get('num_ctx'), 16384)
+            self.assertEqual(payload['options'].get('num_predict'), 8192)
+
+    def test_truncated_generation_is_not_parsed_as_complete_json(self):
+        """Ollama 길이 제한 종료를 구체적인 모델 오류로 알린다."""
+        llm = Ollama()
+        with patch.object(llm, 'post', return_value={'response': '{', 'done_reason': 'length'}):
+            with self.assertRaisesRegex(RuntimeError, '출력 길이'):
+                llm.generate('합성 원문', {'type': 'object'})
+
     def test_spoon_quantity_is_preserved_after_model_output(self):
         """모델이 출력한 반 스푼을 정규화에서 삭제·환산하지 않는다."""
         recipe = normalize({'title': '소스', 'ingredients': [

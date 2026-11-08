@@ -9,6 +9,8 @@ import os
 import re
 import tempfile
 import uuid
+from datetime import datetime, timezone
+import hashlib
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
@@ -19,7 +21,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.concurrency import run_in_threadpool
-from api_schemas import (AnalyzeInput, JobAccepted, RetryInput, ReviewInput,
+from api_schemas import (AnalyzeInput, ReanalyzeInput, JobAccepted, RetryInput, ReviewInput,
     PantryInput, PantryOutput, ReindexInput, EmptyInput,
     RecipesOutput, RecipeDeleted, SearchOutput, JobOutput, ReindexOutput, ReindexAllOutput, ErrorOutput,
     StatusOutput, HealthOutput)
@@ -28,8 +30,14 @@ from integrations import Ollama, QdrantIndex
 from workflows import Pipelines
 from domain import normalize, canonical, SearchInput
 from health import service_health
+from sources import EvidenceCollector
+from media_sources import MediaReader
+from evidence import EVIDENCE_VERSION, QUALITY_VERSION as EVIDENCE_QUALITY_VERSION
 
 ROOT = Path(__file__).resolve().parent
+STARTED_AT = datetime.now(timezone.utc).isoformat()
+CODE_VERSION = hashlib.sha256(b''.join((ROOT / name).read_bytes() for name in
+    ('server.py', 'workflows.py', 'evidence.py', 'sources.py', 'media_sources.py', 'integrations.py', 'prompts/recipe.md'))).hexdigest()[:12]
 os.chdir(ROOT)
 load_dotenv(ROOT / '.env')
 
@@ -71,7 +79,9 @@ def pipelines():
         if PIPELINES is None:
             llm = Ollama()
             qdrant_path = os.environ.get('QDRANT_PATH')
-            PIPELINES = Pipelines(STORE, llm, QdrantIndex(llm, qdrant_path or DATA_DIR / 'qdrant'), extract_transcript, str(DATA_DIR / 'checkpoints.db'))
+            collector = EvidenceCollector(llm, reader=MediaReader(RUNTIME_DIR))
+            PIPELINES = Pipelines(STORE, llm, QdrantIndex(llm, qdrant_path or DATA_DIR / 'qdrant'),
+                                  extract_transcript, str(DATA_DIR / 'checkpoints.db'), collector=collector)
     return PIPELINES
 
 def submit_job(id, payload=None, resume=None):
@@ -430,15 +440,17 @@ def get_status() -> dict[str, Any]:
     """Ollama 모델 목록을 조회한다. 연결 실패도 running=false인 200으로 반환한다."""
     base_url = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11434').rstrip('/')
     model = os.environ.get('OLLAMA_MODEL', 'gemma4:latest')
+    runtime = {'code_version':CODE_VERSION, 'started_at':STARTED_AT,
+               'evidence_version':EVIDENCE_VERSION, 'quality_version':EVIDENCE_QUALITY_VERSION}
     try:
         request = Request(f'{base_url}/api/tags', headers={'User-Agent': 'HanipNote'})
         with urlopen(request, timeout=2) as response:
             payload = json.loads(response.read().decode())
         names = [item.get('name') for item in payload.get('models', [])]
         installed = model in names or (':' not in model and model + ':latest' in names)
-        return {'running': True, 'model': model, 'modelInstalled': installed, 'models': names}
+        return {'running': True, 'model': model, 'modelInstalled': installed, 'models': names, **runtime}
     except Exception:
-        return {'running': False, 'model': model, 'modelInstalled': False, 'models': []}
+        return {'running': False, 'model': model, 'modelInstalled': False, 'models': [], **runtime}
 
 
 @app.get('/api/recipes', tags=['레시피'], summary='저장된 레시피 목록·상세', response_model=RecipesOutput)
@@ -492,6 +504,25 @@ def analyze(body: AnalyzeInput):
     STORE.job(job_id, status='queued', payload=payload)
     submit_job(job_id, payload)
     return {'job_id': job_id}
+
+
+@app.post('/api/reanalyze', tags=['분석'], summary='원본을 보존하며 영상 재분석', status_code=202, response_model=JobAccepted)
+def reanalyze(body: ReanalyzeInput):
+    """저장 원본 ID의 URL로 새 후보 작업을 만든다. 원본 행·인덱스는 교체하지 않는다.
+
+    Returns: 새 job_id. 없는 원본은 404, 영상 없는 직접 입력은 422다.
+    Side Effects: 별도 jobs·체크포인트와 승인 후 새 recipes 행을 만든다.
+    """
+    row = STORE.get(body.recipe_id)
+    if row is None:
+        raise StarletteHTTPException(404, '재분석할 레시피가 없습니다.')
+    from workflows import valid_video
+    valid_video(row['source_url'])
+    payload = {'url':row['source_url'], 'text':'', 'reanalyze_of':row['id']}
+    job_id = str(uuid.uuid4())
+    STORE.job(job_id, status='queued', payload=payload)
+    submit_job(job_id, payload)
+    return {'job_id':job_id}
 
 
 def resume_job(job_id: str, review: ReviewInput | None = None):

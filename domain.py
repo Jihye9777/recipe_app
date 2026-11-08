@@ -22,6 +22,7 @@ class Ingredient(BaseModel):
     unit: str | None = None
     optional: bool = False
     evidence: str = ''
+    source_ids: list[str] = Field(default_factory=list)
 
     @field_validator('quantity', 'unit', mode='before')
     @classmethod
@@ -49,6 +50,8 @@ class CookingStep(BaseModel):
     duration_text: str | None = None
     evidence: str = Field(min_length=1)
     source_step: int | None = Field(default=None, ge=0)
+    source_ids: list[str] = Field(default_factory=list)
+    heat: str | None = None
 
     @field_validator('duration_seconds', 'duration_text', mode='before')
     @classmethod
