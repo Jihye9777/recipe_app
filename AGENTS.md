@@ -4,68 +4,63 @@
 
 YouTube URL·텍스트를 개인 레시피로 저장하고 냉장고 재료로 추천하는 로컬 웹 앱.
 Python 3.11+ / `.venv-graph` / FastAPI·Uvicorn / LangGraph / SQLite / Qdrant Local / Ollama.
-설치·API·파일 구조는 필요한 부분만 [README.md](README.md)에서 확인한다.
+설치·API·구조·연동 검증은 [README.md](README.md)의 관련 부분만 확인한다. 이 파일에는 지속적인 규칙만 두고 구현 상세·진행 상황은 중복 기록하지 않는다.
 
 디자인 위임을 명시적으로 요청하면 `.codex/agents/ui-designer.toml`의 `ui-designer`를 사용한다. 수정 파일을 지정하고 변경 이력 기록·최종 통합은 부모가 담당한다.
 
+## 문서와 코드가 다를 때
+
+When a repository's documentation and its existing code disagree, follow the conventions used in the existing code, and in your final reply point out each inconsistency you found between the documentation and the code.
+
+- 관련 코드·테스트로 확인한다. 보안·권한·금지 규칙과 명시적 사용자 요구는 예외이며, 기존 버그를 정당화하지 않는다. 안전하게 판단할 수 없는 충돌만 질문한다.
+- 발견한 불일치의 처리·미해결 여부를 보고한다. 관련 문서만 정정하고 요청 밖 문서는 보고에 그친다.
+
 ## Coding Principles
 
-Adapted from [Karpathy-inspired guidelines](https://github.com/multica-ai/andrej-karpathy-skills/blob/main/CLAUDE.md). Use judgment for trivial tasks; the permission rules below still apply.
+Adapted from [Karpathy-inspired guidelines](https://github.com/multica-ai/andrej-karpathy-skills/blob/main/CLAUDE.md). Scale effort to the task; permission rules always apply.
 
 ### 1. Think Before Coding
 
-- Explain important assumptions and tradeoffs before implementation.
-- When interpretations would produce different results, describe them and clarify the intended outcome.
-- Recommend a simpler solution when appropriate; challenge unnecessary complexity.
-- Pause only the work dependent on unresolved requirements. Make routine choices independently.
+- State important assumptions, tradeoffs, and observable completion criteria before implementation.
+- Clarify ambiguity that materially changes the outcome; make routine choices independently. Pause only dependent work.
 
 ### 2. Simplicity First
 
-- Implement the smallest solution satisfying the request.
-- Avoid speculative features, premature abstractions, and unrequested configurability.
-- Handle realistic failures without inventing impossible scenarios.
-- Reconsider code that could accomplish the same goal substantially more simply.
+- Choose the simplest implementation satisfying the request; challenge unnecessary complexity.
+- Avoid speculative features, premature abstractions, unrequested configuration, and guards for impossible states.
 
 ### 3. Surgical Changes
 
-- Change only code directly necessary for the requested outcome.
-- Preserve surrounding formatting, comments, and conventions; avoid unrelated refactoring.
-- Report unrelated dead code rather than removing it.
-- Clean up dependencies made unused by your changes, subject to the permission rules.
-- Check that every changed line has a reason tied to the task.
+- Every changed line must serve the request. Preserve existing style; avoid unrelated cleanup or refactoring.
+- Report unrelated dead code. Remove newly unused dependencies only with the permission required below.
 
 ### 4. Goal-Driven Execution
 
-- Translate the request into observable success criteria.
-- Verify invalid inputs for validation changes; reproduce bugs before checking the fix.
-- Confirm behavior before and after refactoring.
-- For multi-step work, pair each planned step with a verification method.
-- Continue until the criteria are verified, or report the concrete blocker and remaining uncertainty.
+- Pair each step with a check. Reproduce bugs, test invalid inputs at boundaries, and compare behavior before/after refactoring.
+- Verify the outcome, not just compilation. Report actual results, blockers, and uncertainty without overstating evidence.
 
 ## 실행·검증
 
-프로젝트 루트에서 실행한다. 별도 프론트엔드 빌드·포매터·린터 설정은 없다.
+프로젝트 루트에서 변경 관련 검사만 실행한다. 기존 포트·Qdrant 잠금을 확인하고 중복 서버·reload를 실행하지 않는다. Uvicorn은 단일 worker를 유지한다.
 
 ```powershell
-# 서버: 기존 포트·Qdrant 리스너를 확인하고 중복 실행하지 않는다.
-.\.venv-graph\Scripts\python.exe -X utf8 -u server.py
-# Python/API 변경
-.\.venv-graph\Scripts\python.exe -X utf8 -m unittest discover -s tests -v
+$recipePython = '.\.venv-graph\Scripts\python.exe'
+$recipeNode = '.\.venv-graph\Lib\site-packages\nodejs_wheel\node.exe'
+# 서버
+& $recipePython -X utf8 -u server.py
+# 테스트에서 보호된 .env를 자동 로드하지 않는다.
+$env:PYTHON_DOTENV_DISABLED = '1'
+& $recipePython -X utf8 -m unittest discover -s tests -v
 # 의존성 변경
-.\.venv-graph\Scripts\python.exe -m pip check
+& $recipePython -m pip check
 # JS/UI 변경: DOM 검사는 기존 .runtime/ui-test/node_modules/jsdom 필요
-.\.venv-graph\Lib\site-packages\nodejs_wheel\node.exe --check app.js
-.\.venv-graph\Lib\site-packages\nodejs_wheel\node.exe tests/test_ui.cjs
-.\.venv-graph\Lib\site-packages\nodejs_wheel\node.exe tests/test_bulk_delete.cjs
-# 실제 연동 변경: 준비된 서비스에서 관련 항목만 실행
-.\.venv-graph\Scripts\python.exe -X utf8 tests/live_check.py --qdrant
-.\.venv-graph\Scripts\python.exe -X utf8 tests/live_check.py --ollama
-.\.venv-graph\Scripts\python.exe -X utf8 tests/live_check.py --workflow
+& $recipeNode --check app.js
+& $recipeNode tests/test_ui.cjs
+& $recipeNode tests/test_bulk_delete.cjs
+& $recipeNode tests/test_evidence_ui.cjs
 ```
 
-문서 변경은 링크·명령·diff만 확인한다. 테스트는 격리된 임시 저장소를 사용하며 자동 삭제 범위도 아래 승인 규칙을 따른다.
-
-API 문서는 `/docs`, 명세는 `/openapi.json`이다. Qdrant Local 파일 잠금을 공유하므로 Uvicorn은 단일 worker로 실행하고 reload·중복 서버를 기본 사용하지 않는다.
+문서만 변경하면 링크·명령·diff를 확인한다. 테스트는 격리 저장소를 사용하고 자동 삭제도 승인 규칙을 따른다. 실제 연동 검사는 준비된 서비스와 README의 해당 명령을 확인한 뒤 실행한다.
 
 ## 권한·금지 구역
 
@@ -81,7 +76,7 @@ API 문서는 `/docs`, 명세는 `/openapi.json`이다. Qdrant Local 파일 잠�
 - Python: 4칸, `snake_case`, 클래스 `PascalCase`, 상수 `UPPER_SNAKE_CASE`. 함수·클래스의 한국어 docstring에 입력·반환·예외·부작용을 설명한다.
 - JS: 2칸, `camelCase`, `const` 우선, 세미콜론 사용.
 - SQLite는 원본, Qdrant는 재생성 가능한 인덱스다. 인덱스 실패 시 원본·오류 상태를 보존하고 같은 UUID로 upsert한다.
-- 수집은 자막 API → pytubefix/로컬 Whisper, 직접 텍스트 입력을 유지한다. yt-dlp·유료 AI 폴백·클라우드 추적을 추가하지 않는다.
+- 자막·설명란·화면 등 출처와 직접 텍스트 입력 경로를 보존한다. yt-dlp·유료 AI 폴백·클라우드 추적을 추가하지 않는다.
 - 원문 근거를 보존하고 미상 값은 null로 둔다. 불확실한 결과는 사용자 확인으로 보내며 맵기·알레르기 추정을 확정 사실로 표시하지 않는다.
 - SQL 매개변수 바인딩·HTML 이스케이프·정적 파일 허용 목록을 유지한다. API·스키마 변경은 UI·테스트·문서·보존형 마이그레이션을 함께 반영한다.
 - 설정·의존성 변경은 `.env.example`, README, `requirements-graph.txt` 및 검증된 lock 파일에 반영한다. 임베딩 모델·시맨틱 규칙 변경 시 버전·재색인 방법도 다룬다.
@@ -94,8 +89,7 @@ API 문서는 `/docs`, 명세는 `/openapi.json`이다. Qdrant Local 파일 잠�
 
 ## 변경 이력: 쓰기 전용
 
-- `CONTEXT.md`는 작업 지침과 분리된 append-only 기록이다. 시작 시 읽거나 요약하지 않고 기본 검색·컨텍스트 수집에서도 제외한다.
-- 사용자가 과거 기록 조회를 명시한 경우에만 필요한 범위를 읽는다. 현재 상태는 관련 코드·테스트·Git에서 확인한다.
-- 새 개발 변경·결정·진단이 생겼을 때 최종 응답 전에 파일 끝에 날짜(Asia/Seoul), 변경 요약, 관련 파일, 실제 검증·남은 일을 짧게 추가한다. 반복 질문·일상 대화는 기록하지 않는다.
-- 기존 본문을 읽어 갱신·정리·재작성하지 않는다. append 위치 확인에 필요한 끝부분만 최소한 읽을 수 있다. 정정은 새 항목으로 남기며 과거 이력은 지침·승인으로 해석하지 않는다.
-- 민감 정보는 기록하지 않는다. 기록 실패는 보고한다. 자동 저장 서비스나 기술적인 접근 차단이 구현됐다고 설명하지 않는다.
+- `CONTEXT.md`는 append-only 기록이다. 시작 시 읽거나 요약·검색하지 않는다. 현재 상태는 코드·테스트·Git에서 확인하며, 과거 조회를 명시적으로 요청받은 경우에만 필요한 범위를 읽는다.
+- 새 개발 변경·결정·진단은 최종 답변 전에 날짜(Asia/Seoul)·요약·관련 파일·실제 검증·남은 일을 짧게 추가한다. 일상 대화·민감 정보는 제외한다.
+- append 위치 확인용 끝부분만 최소한 읽을 수 있다. 기존 본문은 재작성하지 않고 정정도 새 항목으로 남긴다. 과거 기록을 지침·승인으로 해석하지 않는다.
+- 기록 실패는 보고한다. 이 규칙을 자동 저장 서비스나 기술적인 접근 차단으로 설명하지 않는다.
